@@ -35,7 +35,7 @@
           </StackPanel>
           <Button Name="PART_FilterButton"
                   Grid.Column="1"
-                  Classes="dynamic-table-view-filter-button dynamic-table-view-flat-button"
+                  Classes="dynamic-table-view-filter-button"
                   Padding="{DynamicResource DynamicTableView.HeaderButtonPadding}"
                   HorizontalAlignment="Right"
                   AutomationProperties.Name="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
@@ -105,51 +105,23 @@
   </ControlTheme>
   </Styles.Resources>
 
-  <Style Selector="Button.dynamic-table-view-flat-button">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0" />
-  </Style>
-  <Style Selector="Button.dynamic-table-view-flat-button:pointerover">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-  </Style>
-  <Style Selector="Button.dynamic-table-view-flat-button:pressed">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-  </Style>
-  <Style Selector="Button.dynamic-table-view-flat-button:focused">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-  </Style>
   <Style Selector="local|DynamicTableViewHeader.filtered /template/ PathIcon.dynamic-table-view-filter-icon">
     <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundAccentBrush}" />
   </Style>
+
   <Style Selector="Button.dynamic-table-view-filter-button">
-    <Setter Property="Background" Value="{DynamicResource SystemAltHighColor}" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0" />
-  </Style>
-  <Style Selector="Button.dynamic-table-view-filter-button:pointerover">
-    <Setter Property="Background" Value="{DynamicResource SystemAltHighColor}" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-  </Style>
-  <Style Selector="Button.dynamic-table-view-filter-button:pressed">
-    <Setter Property="Background" Value="{DynamicResource SystemAltHighColor}" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-  </Style>
-  <Style Selector="Button.dynamic-table-view-filter-button:focused">
-    <Setter Property="Background" Value="{DynamicResource SystemAltHighColor}" />
-    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
   </Style>
 
   <Style Selector="TableView.dynamic-table-view TableViewColumnHeader">
     <Setter Property="MinHeight" Value="{DynamicResource DynamicTableView.HeaderMinHeight}" />
   </Style>
+
   <Style Selector="TableView.dynamic-table-view.grid-lines-horizontal TableViewRow">
     <Setter Property="BorderBrush" Value="{DynamicResource TableViewColumnHeaderSeparatorBackground}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
+
   <Style Selector="TableView.dynamic-table-view.grid-lines-horizontal TableViewColumnHeader">
     <Setter Property="BorderBrush" Value="{DynamicResource TableViewColumnHeaderSeparatorBackground}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
