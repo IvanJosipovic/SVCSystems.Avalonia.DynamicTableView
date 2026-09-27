@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabled": true,
+  "timezone": "America/Vancouver",
+  "dependencyDashboard": true,
+  "semanticCommits": "enabled",
+  "assignees": [
+    "@ivanjosipovic"
+  ],
+  "extends": [
+    "config:recommended"
+  ],
+  "platformAutomerge": true,
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0,
+  "ignorePaths": [
+    "**/docs/**"
+  ],
+  "schedule": [
+    "before 4am"
+  ],
+  "packageRules": [
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true,
+      "matchFileNames": [
+        "global.json"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true,
+      "semanticCommitType": "fix",
+      "matchFileNames": [
+        "src/**"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true,
+      "matchFileNames": [
+        ".github/workflows/**",
+        "tests/**",
+        "benchmarks/**"
+      ]
+    },
+    {
+      "matchManagers": [
+        "nuget"
+      ],
+      "matchPackageNames": [
+        "PropertyGenerator.Avalonia"
+      ],
+      "semanticCommitType": "chore"
+    }
+  ]
+}
