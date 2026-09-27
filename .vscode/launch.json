@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch DynamicTableView Sample",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder}/samples/SvcSystems.Avalonia.DynamicTableView.Sample/bin/Debug/net10.0/SvcSystems.Avalonia.DynamicTableView.Sample.dll",
+            "cwd": "${workspaceFolder}/samples/SvcSystems.Avalonia.DynamicTableView.Sample",
+            "console": "integratedTerminal",
+            "preLaunchTask": "dotnet: build solution"
+        }
+    ]
+}
