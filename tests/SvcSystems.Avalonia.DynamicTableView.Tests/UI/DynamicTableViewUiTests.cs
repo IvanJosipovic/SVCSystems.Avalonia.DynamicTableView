@@ -452,6 +452,114 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Restoring_saved_star_columns_after_widening_the_window_preserves_proportions_and_fills_view()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.Width = 1;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Id);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.Width = 2;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var originalState = table.CaptureState();
+            Assert.Equal(DynamicTableViewWidthMode.Star, originalState.Columns[0].WidthMode);
+            Assert.Equal(1, originalState.Columns[0].Width);
+            Assert.Equal(DynamicTableViewWidthMode.Star, originalState.Columns[1].WidthMode);
+            Assert.Equal(2, originalState.Columns[1].Width);
+
+            window.Width = 960;
+            Dispatcher.UIThread.RunJobs();
+            table.RestoreState(originalState);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
+            Assert.InRange(table.Columns[1].ActualWidth / table.Columns[0].ActualWidth, 1.95, 2.05);
+            var headers = table.GetVisualDescendants().OfType<TableViewColumnHeader>().ToArray();
+            var firstHeaderLeft = headers[0].TranslatePoint(default, table)?.X
+                ?? throw new InvalidOperationException("First header has no table position.");
+            var lastHeaderRight = headers[^1].TranslatePoint(
+                new Point(headers[^1].Bounds.Width, 0), table)?.X
+                ?? throw new InvalidOperationException("Last header has no table position.");
+            Assert.InRange(
+                Math.Abs(table.Columns.Sum(static column => column.ActualWidth) - (lastHeaderRight - firstHeaderLeft)),
+                0,
+                2);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_a_star_column_manually_saves_and_restores_it_as_pixels()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.Width = 1;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Id);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.Width = 1;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeStart = header.TranslatePoint(
+                new Point(header.Bounds.Width - 2, header.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeEnd = new(resizeStart.X + 70, resizeStart.Y);
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            window.MouseUp(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            DynamicTableViewState state = table.CaptureState();
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[0].WidthMode);
+
+            window.Width = 960;
+            Dispatcher.UIThread.RunJobs();
+            table.RestoreState(state);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(state.Columns[0].Width, table.Columns[0].Width.Value);
+            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Auto_width_grows_from_realized_cells_and_honors_header_and_pixel_modes()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

@@ -28,6 +28,8 @@ public sealed partial class DynamicTableView : TableView
     private Vector? _pendingScrollOffset;
     private bool _applyingScrollRestore;
     private int _pointerDownColumn = -1;
+    private string? _pointerDownResizeKey;
+    private double _pointerDownResizeWidth;
     private Point _pointerDownPosition;
     private bool _headerDragStarted;
     private int _selectionDragAnchor = -1;
@@ -65,16 +67,21 @@ public sealed partial class DynamicTableView : TableView
         for (var i = 0; i < source.Columns.Count; i++)
         {
             var definition = source.Columns[i];
-            var width = _nativeColumns.TryGetValue(definition.Key, out var native)
-                ? native.ActualWidth
-                : definition.Width;
-            columns.Add(new(definition.Key, i, double.IsFinite(width) ? width : definition.MinWidth));
+            var widthMode = definition.WidthMode;
+            var width = definition.Width;
+            if (widthMode != DynamicTableViewWidthMode.Star && _nativeColumns.TryGetValue(definition.Key, out var native))
+            {
+                var actualWidth = native.ActualWidth;
+                if (double.IsFinite(actualWidth) && actualWidth > 0)
+                    width = actualWidth;
+            }
+            columns.Add(new(definition.Key, i, width, widthMode));
         }
         var scrollOffset = _pendingScrollOffset ?? FindScrollViewer()?.Offset ?? default;
         return new(columns, source.SortDescriptors.ToArray(), source.FilterDescriptors.ToArray(), scrollOffset);
     }
 
-    /// <summary>Restores column order, pixel widths, sort descriptors, filters, and scroll offset by stable key.</summary>
+    /// <summary>Restores column order, sizing modes and widths, sort descriptors, filters, and scroll offset by stable key.</summary>
     public void RestoreState(DynamicTableViewState state)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -107,9 +114,14 @@ public sealed partial class DynamicTableView : TableView
             var definition = FindDefinition(saved.Key);
             if (definition is null)
                 continue;
-            definition.WidthMode = DynamicTableViewWidthMode.Pixel;
-            definition.Width = Math.Max(definition.MinWidth, saved.Width);
-            _manuallySizedColumns.Add(saved.Key);
+            definition.WidthMode = saved.WidthMode;
+            definition.Width = saved.WidthMode == DynamicTableViewWidthMode.Pixel
+                ? Math.Max(definition.MinWidth, saved.Width)
+                : saved.Width;
+            if (saved.WidthMode == DynamicTableViewWidthMode.Pixel)
+                _manuallySizedColumns.Add(saved.Key);
+            else
+                _manuallySizedColumns.Remove(saved.Key);
         }
 
         if (!source.SortDescriptors.SequenceEqual(state.Sorts))
@@ -262,7 +274,7 @@ public sealed partial class DynamicTableView : TableView
         {
             DynamicTableViewWidthMode.Pixel => new GridLength(Math.Max(definition.MinWidth, definition.Width)),
             DynamicTableViewWidthMode.Star => new GridLength(Math.Max(0.1, definition.Width), GridUnitType.Star),
-            _ => new GridLength(Math.Max(definition.MinWidth, 80))
+            _ => new GridLength(Math.Max(definition.MinWidth, Math.Max(80, definition.Width)))
         };
 
     private void UpdateHeaderStates()
@@ -403,22 +415,29 @@ public sealed partial class DynamicTableView : TableView
             }
         }
 
-        if (FindHeader(e.Source) is not { } header || FindDefinition(header.Column.Key) is not { } definition)
+        var dynamicHeader = FindHeader(e.Source);
+        var columnHeader = FindColumnHeader(e.Source);
+        var definition = dynamicHeader?.Column ?? columnHeader?.Column?.Header as DynamicTableViewColumn;
+        if (definition is null)
             return;
-        if (IsWithinNamedControl(e.Source, "PART_FilterButton"))
+        if (dynamicHeader is not null && IsWithinNamedControl(e.Source, "PART_FilterButton"))
         {
             _pointerDownColumn = -1;
             return;
         }
 
-        var native = header.NativeColumn;
+        var native = dynamicHeader?.NativeColumn ?? columnHeader?.Column;
         if (native is null)
             return;
-        var position = e.GetPosition(header);
-        if (position.X >= header.Bounds.Width - 7)
+        var resizeHeader = (Control?)columnHeader ?? dynamicHeader;
+        var position = e.GetPosition(resizeHeader);
+        if (position.X >= resizeHeader.Bounds.Width - 7)
         {
-            _manuallySizedColumns.Add(definition.Key);
-            definition.WidthMode = DynamicTableViewWidthMode.Pixel;
+            _pointerDownResizeKey = definition.Key;
+            _pointerDownPosition = e.GetPosition(this);
+            _pointerDownResizeWidth = native.ActualWidth;
+            _pointerDownColumn = -1;
+            return;
         }
         _pointerDownColumn = Columns.IndexOf(native);
         _pointerDownPosition = e.GetPosition(this);
@@ -439,6 +458,23 @@ public sealed partial class DynamicTableView : TableView
                 UpdateRowSelectionDrag(targetRowIndex);
                 e.Handled = true;
             }
+        }
+
+        if (_pointerDownResizeKey is { } resizeKey &&
+            Math.Abs(e.GetPosition(this).X - _pointerDownPosition.X) >= 5)
+        {
+            if (FindDefinition(resizeKey) is { } resizedDefinition && _nativeColumns.TryGetValue(resizeKey, out var resizedNative))
+            {
+                _manuallySizedColumns.Add(resizeKey);
+                resizedDefinition.WidthMode = DynamicTableViewWidthMode.Pixel;
+                var newWidth = Math.Max(
+                    resizedDefinition.MinWidth,
+                    _pointerDownResizeWidth + e.GetPosition(this).X - _pointerDownPosition.X);
+                resizedDefinition.Width = newWidth;
+                resizedNative.Width = new GridLength(newWidth);
+            }
+            e.Handled = true;
+            return;
         }
 
         if (_pointerDownColumn < 0)
@@ -462,6 +498,7 @@ public sealed partial class DynamicTableView : TableView
     private void OnGridPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         _pointerDownColumn = -1;
+        _pointerDownResizeKey = null;
         _headerDragStarted = false;
         _selectionDragAnchor = -1;
         _selectionDragLast = -1;
@@ -592,6 +629,11 @@ public sealed partial class DynamicTableView : TableView
 
         return null;
     }
+
+    private static TableViewColumnHeader? FindColumnHeader(object? source)
+        => source is Visual visual
+            ? visual.GetSelfAndVisualAncestors().OfType<TableViewColumnHeader>().FirstOrDefault()
+            : null;
 
     private static bool IsWithinNamedControl(object? source, string name)
         => source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Control>().Any(control => control.Name == name);
