@@ -78,7 +78,7 @@ The collection changes are reflected in the table. The key selector supplies sta
 
 `DynamicTableView.GridLinesVisibility` controls separators between cells and headers. It defaults to `None`; use `Horizontal`, `Vertical`, or `All` to show lines. Grid lines use Avalonia Fluent's `TableViewColumnHeaderSeparatorBackground` resource, so they follow the active Fluent theme. Override that Fluent resource in the host application to customize the color.
 
-Filter flyouts default to 280 pixels wide, matching ProDataGrid's distinct-value filter width. Override the width on an individual table through its resources:
+Filter flyouts default to 280 pixels wide. Override the width on an individual table through its resources:
 
 ```xml
 <DynamicTableView xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">

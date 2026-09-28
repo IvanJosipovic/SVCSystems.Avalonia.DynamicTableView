@@ -1,6 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="using:SvcSystems.Avalonia.DynamicTableView">
+        xmlns:local="using:SvcSystems.Avalonia.DynamicTableView"
+        x:Class="SvcSystems.Avalonia.DynamicTableView.DynamicTableViewTheme">
   <Styles.Resources>
     <x:Double x:Key="DynamicTableView.FlyoutSpacing">4</x:Double>
     <x:Double x:Key="DynamicTableView.FilterFlyoutWidth">280</x:Double>
