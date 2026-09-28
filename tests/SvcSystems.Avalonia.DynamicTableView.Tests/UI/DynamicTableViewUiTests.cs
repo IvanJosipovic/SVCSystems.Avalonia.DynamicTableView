@@ -1003,9 +1003,16 @@ public sealed class DynamicTableViewUiTests
             window.MouseUp(tenth, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
 
-            var selectedStart = GetRowCenter(window, table, "row-00");
+            window.MouseDown(fifth, MouseButton.Left);
+            window.MouseMove(tenth, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(Enumerable.Range(4, 6), source.SelectionModel.SelectedIndexes.Order());
+            window.MouseUp(tenth, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            var selectedStart = GetRowCenter(window, table, "row-04");
             var selectedEnd = GetRowCenter(window, table, "row-09");
-            window.MouseDown(selectedStart, MouseButton.Left);
+            window.MouseDown(selectedStart, MouseButton.Left, RawInputModifiers.Control);
             window.MouseMove(selectedEnd, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
 
