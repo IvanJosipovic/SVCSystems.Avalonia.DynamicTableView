@@ -515,7 +515,7 @@ public sealed class DynamicTableViewUiTests
         second.WidthMode = DynamicTableViewWidthMode.Star;
         second.Width = 1;
         using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
-        DynamicTableView table = new() { Source = source };
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 640, Height = 320, Content = table };
 
         try
@@ -527,12 +527,14 @@ public sealed class DynamicTableViewUiTests
             var resizeStart = header.TranslatePoint(
                 new Point(header.Bounds.Width - 2, header.Bounds.Height / 2), window)
                 ?? throw new InvalidOperationException("Header has no window position.");
-            Point resizeEnd = new(resizeStart.X + 70, resizeStart.Y);
+            Point resizeEnd = new(resizeStart.X + 3, resizeStart.Y);
 
+            Assert.True(table.CanUserResizeColumns);
             window.MouseDown(resizeStart, MouseButton.Left);
             window.MouseUp(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
 
             window.MouseDown(resizeStart, MouseButton.Left);
             window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
@@ -552,6 +554,49 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
             Assert.Equal(state.Columns[0].Width, table.Columns[0].Width.Value);
             Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Column_resizing_is_disabled_when_CanUserResizeColumns_is_false()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.Width = 1;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Id);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.Width = 1;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = false };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeStart = header.TranslatePoint(
+                new Point(header.Bounds.Width - 2, header.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeEnd = new(resizeStart.X + 70, resizeStart.Y);
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(table.CanUserResizeColumns);
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(1, table.Columns[0].Width.Value);
         }
         finally
         {

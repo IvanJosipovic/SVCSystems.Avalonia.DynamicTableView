@@ -433,10 +433,13 @@ public sealed partial class DynamicTableView : TableView
         var position = e.GetPosition(resizeHeader);
         if (position.X >= resizeHeader.Bounds.Width - 7)
         {
-            _pointerDownResizeKey = definition.Key;
-            _pointerDownPosition = e.GetPosition(this);
-            _pointerDownResizeWidth = native.ActualWidth;
             _pointerDownColumn = -1;
+            if (native.CanUserEffectivelyResize)
+            {
+                _pointerDownResizeKey = definition.Key;
+                _pointerDownPosition = e.GetPosition(this);
+                _pointerDownResizeWidth = native.ActualWidth;
+            }
             return;
         }
         _pointerDownColumn = Columns.IndexOf(native);
@@ -497,6 +500,27 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnGridPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_pointerDownResizeKey is { } resizeKey &&
+            FindDefinition(resizeKey) is { } resizedDefinition &&
+            _nativeColumns.TryGetValue(resizeKey, out var resizedNative))
+        {
+            var resizedWidth = resizedNative.Width.GridUnitType == GridUnitType.Pixel
+                ? resizedNative.Width.Value
+                : resizedNative.ActualWidth;
+            if (double.IsFinite(resizedWidth) && Math.Abs(resizedWidth - _pointerDownResizeWidth) > 0.01)
+            {
+                _manuallySizedColumns.Add(resizeKey);
+                resizedDefinition.WidthMode = DynamicTableViewWidthMode.Pixel;
+                resizedDefinition.Width = Math.Max(resizedDefinition.MinWidth, resizedWidth);
+                resizedNative.Width = new GridLength(resizedDefinition.Width);
+            }
+            else if (resizedDefinition.WidthMode == DynamicTableViewWidthMode.Star &&
+                resizedNative.Width.GridUnitType == GridUnitType.Pixel)
+            {
+                resizedNative.Width = new GridLength(Math.Max(0.1, resizedDefinition.Width), GridUnitType.Star);
+            }
+        }
+
         _pointerDownColumn = -1;
         _pointerDownResizeKey = null;
         _headerDragStarted = false;
