@@ -36,6 +36,7 @@ public sealed partial class DynamicTableView : TableView
     private int _selectionDragLast = -1;
     private bool _selectionDragSelect;
     private HashSet<int>? _selectionDragInitialSelection;
+    private TableViewColumnHeader? _filterButtonPointerHeader;
 
     /// <summary>Creates an empty dynamic table.</summary>
     public DynamicTableView()
@@ -449,6 +450,8 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnGridPointerMoved(object? sender, PointerEventArgs e)
     {
+        UpdateFilterButtonPointerHeader(e.Source);
+
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed is false)
             return;
 
@@ -661,6 +664,38 @@ public sealed partial class DynamicTableView : TableView
 
     private static bool IsWithinNamedControl(object? source, string name)
         => source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Control>().Any(control => control.Name == name);
+
+    private void UpdateFilterButtonPointerHeader(object? source)
+    {
+        TableViewColumnHeader? columnHeader = null;
+        var isOverFilterButton = false;
+        if (source is Visual visual)
+        {
+            foreach (var ancestor in visual.GetSelfAndVisualAncestors())
+            {
+                if (ancestor is Control control && control.Name == "PART_FilterButton")
+                    isOverFilterButton = true;
+                if (ancestor is TableViewColumnHeader header)
+                {
+                    columnHeader = header;
+                    break;
+                }
+            }
+        }
+
+        if (_filterButtonPointerHeader is not null &&
+            (!isOverFilterButton || !ReferenceEquals(_filterButtonPointerHeader, columnHeader)))
+        {
+            _filterButtonPointerHeader.Classes.Remove("filter-button-pointerover");
+            _filterButtonPointerHeader = null;
+        }
+
+        if (isOverFilterButton && columnHeader is not null)
+        {
+            columnHeader.Classes.Add("filter-button-pointerover");
+            _filterButtonPointerHeader = columnHeader;
+        }
+    }
 
     private static TableViewRow? FindRow(object? source)
         => source is Visual visual ? visual.GetSelfAndVisualAncestors().OfType<TableViewRow>().FirstOrDefault() : null;

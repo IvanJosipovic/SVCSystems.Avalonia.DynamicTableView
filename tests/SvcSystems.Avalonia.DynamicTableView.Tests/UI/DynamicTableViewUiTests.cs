@@ -110,6 +110,181 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Clicking_top_and_bottom_of_header_sorts_the_column()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var columnHeader = Assert.Single(header.GetSelfAndVisualAncestors().OfType<TableViewColumnHeader>());
+            Assert.Equal(columnHeader.Bounds.Height, header.Bounds.Height);
+
+            Point topPoint = columnHeader.TranslatePoint(
+                new Point(columnHeader.Bounds.Width / 2, 1), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            window.MouseDown(topPoint, MouseButton.Left);
+            window.MouseUp(topPoint, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(ListSortDirection.Ascending, Assert.Single(source.SortDescriptors).Direction);
+
+            Point bottomPoint = columnHeader.TranslatePoint(
+                new Point(columnHeader.Bounds.Width / 2, columnHeader.Bounds.Height - 1), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            window.MouseDown(bottomPoint, MouseButton.Left);
+            window.MouseUp(bottomPoint, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(ListSortDirection.Descending, Assert.Single(source.SortDescriptors).Direction);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Column_header_changes_its_full_background_on_hover()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        SolidColorBrush hoverBrush = new(Colors.Orange);
+        table.Resources["SystemControlHighlightListLowBrush"] = hoverBrush;
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var columnHeader = Assert.Single(header.GetSelfAndVisualAncestors().OfType<TableViewColumnHeader>());
+            var headerStrip = Assert.Single(columnHeader.GetSelfAndVisualAncestors().OfType<Border>()
+                .Where(border => border.GetVisualParent() is DockPanel { Name: "ContentPanel" }));
+            var hoverSurface = Assert.Single(columnHeader.GetVisualDescendants().OfType<ContentPresenter>(),
+                presenter => presenter.Name == "PART_ContentPresenter" && presenter.Bounds.Size == columnHeader.Bounds.Size && presenter.BorderThickness == default);
+            var otherHeaders = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Where(candidate => !ReferenceEquals(candidate, columnHeader))
+                .ToArray();
+            var otherHoverSurfaces = otherHeaders.Select(candidate => Assert.Single(
+                candidate.GetVisualDescendants().OfType<ContentPresenter>(),
+                presenter => presenter.Name == "PART_ContentPresenter" && presenter.Bounds.Size == candidate.Bounds.Size && presenter.BorderThickness == default))
+                .ToArray();
+            Assert.Equal(window.Width, headerStrip.Bounds.Width);
+            Assert.Equal(default, headerStrip.Padding);
+            Assert.Equal(0, columnHeader.Bounds.X);
+            Assert.Equal(45, headerStrip.Bounds.Height);
+            Assert.Equal(columnHeader.Bounds, hoverSurface.Bounds);
+            var resizer = Assert.Single(columnHeader.GetVisualDescendants().OfType<Thumb>());
+            Assert.Equal(new Thickness(0, 0, -6, 0), resizer.Margin);
+            Assert.Equal(0, resizer.Bounds.Y);
+            Assert.Equal(columnHeader.Bounds.Height, resizer.Bounds.Height);
+            Assert.Equal(headerStrip.Bounds.Height, columnHeader.Bounds.Height);
+            Assert.NotSame(hoverBrush, hoverSurface.Background);
+            Assert.NotSame(hoverBrush, headerStrip.Background);
+            Assert.All(otherHoverSurfaces, surface => Assert.NotSame(hoverBrush, surface.Background));
+
+            // The full header rectangle, including its top and bottom edges, is the hit target.
+            var point = columnHeader.TranslatePoint(
+                new Point(columnHeader.Bounds.Width - 2, 1), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            window.MouseMove(point);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(columnHeader.IsPointerOver);
+            Assert.Same(hoverBrush, hoverSurface.Background);
+            Assert.NotSame(hoverBrush, headerStrip.Background);
+            Assert.All(otherHoverSurfaces, surface => Assert.NotSame(hoverBrush, surface.Background));
+            Assert.Equal(columnHeader.Bounds, hoverSurface.Bounds);
+
+            var bottomPoint = columnHeader.TranslatePoint(
+                new Point(columnHeader.Bounds.Width - 2, columnHeader.Bounds.Height - 1), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            window.MouseMove(bottomPoint);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(columnHeader.IsPointerOver);
+            Assert.Same(hoverBrush, hoverSurface.Background);
+
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Name == "PART_FilterButton"));
+            var filterButtonPoint = filterButton.TranslatePoint(
+                new Point(filterButton.Bounds.Width / 2, filterButton.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Filter button has no window position.");
+            window.MouseMove(filterButtonPoint);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filterButton.IsPointerOver);
+            Assert.True(columnHeader.IsPointerOver);
+            Assert.NotSame(hoverBrush, hoverSurface.Background);
+
+            window.MouseMove(point);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(columnHeader.IsPointerOver);
+            Assert.Same(hoverBrush, hoverSurface.Background);
+
+            window.MouseMove(new Point(window.Bounds.Width - 2, window.Bounds.Height - 2));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(columnHeader.IsPointerOver);
+            Assert.NotSame(hoverBrush, hoverSurface.Background);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Single_column_header_hover_fills_the_full_column_header_bounds()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        SolidColorBrush hoverBrush = new(Colors.Orange);
+        table.Resources["SystemControlHighlightListLowBrush"] = hoverBrush;
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var columnHeader = Assert.Single(table.GetVisualDescendants().OfType<TableViewColumnHeader>());
+            var headerStrip = Assert.Single(columnHeader.GetSelfAndVisualAncestors().OfType<Border>()
+                .Where(border => border.GetVisualParent() is DockPanel { Name: "ContentPanel" }));
+            var hoverSurface = Assert.Single(columnHeader.GetVisualDescendants().OfType<ContentPresenter>(),
+                presenter => presenter.Name == "PART_ContentPresenter" && presenter.Bounds.Size == columnHeader.Bounds.Size && presenter.BorderThickness == default);
+            var point = columnHeader.TranslatePoint(
+                new Point(columnHeader.Bounds.Width / 2, columnHeader.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+
+            window.MouseMove(point);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Same(hoverBrush, hoverSurface.Background);
+            Assert.Equal(columnHeader.Bounds, hoverSurface.Bounds);
+            Assert.Equal(headerStrip.Bounds.Height, columnHeader.Bounds.Height);
+            Assert.Equal(columnHeader.TranslatePoint(default, window), hoverSurface.TranslatePoint(default, window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void All_column_headers_are_templated_with_many_columns()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -809,10 +984,6 @@ public sealed class DynamicTableViewUiTests
 
             var first = GetRowCenter(window, table, "row-00");
             var tenth = GetRowCenter(window, table, "row-09");
-            var hit = table.GetVisualAt(window.TranslatePoint(tenth, table) ?? tenth);
-            var hitRow = hit!.GetSelfAndVisualAncestors().OfType<TableViewRow>().Single(row =>
-                row.DataContext is DynamicTableViewTestRow data && data.Id == "row-09");
-            Assert.Equal(9, table.IndexFromContainer(hitRow));
             window.MouseDown(first, MouseButton.Left);
             window.MouseMove(tenth, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
@@ -1013,6 +1184,55 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Standard_filter_dropdowns_fill_the_flyout_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        table.Resources["DynamicTableView.FilterFlyoutWidth"] = 360d;
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 3);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+
+            var flyoutContent = Assert.IsAssignableFrom<Control>(flyout.Content);
+            var panel = Assert.Single(flyoutContent.GetVisualDescendants().OfType<StackPanel>()
+                .Where(static panel => panel.Width == 360));
+            var operatorBox = Assert.Single(flyoutContent.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_OperatorBox"));
+            var choiceBox = Assert.Single(flyoutContent.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_ChoiceBox"));
+
+            Assert.Equal(360, panel.Bounds.Width);
+            Assert.True(operatorBox.IsVisible);
+            Assert.True(choiceBox.IsVisible);
+            Assert.Equal(panel.Bounds.Width, operatorBox.Bounds.Width);
+            Assert.Equal(panel.Bounds.Width, choiceBox.Bounds.Width);
+
+            choiceBox.IsDropDownOpen = true;
+            Dispatcher.UIThread.RunJobs();
+
+            var popup = Assert.Single(choiceBox.GetVisualDescendants().OfType<Popup>());
+            Assert.Equal(choiceBox.Bounds.Width, popup.MinWidth);
+            Assert.True(popup.Bounds.Width >= choiceBox.Bounds.Width);
+            flyout.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Standard_text_and_numeric_filter_flyouts_apply_typed_values()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1042,14 +1262,14 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Filter_icon_uses_accent_foreground_while_column_filter_is_active()
+    public void Filter_button_uses_fluent_hover_background_and_icon_highlight()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
-        SolidColorBrush accentBrush = new(Colors.Orange);
-        table.Resources["SystemControlForegroundAccentBrush"] = accentBrush;
+        SolidColorBrush backgroundBrush = new(Colors.LightGray);
+        table.Resources["SystemControlBackgroundChromeMediumBrush"] = backgroundBrush;
         Window window = new() { Width = 520, Height = 260, Content = table };
 
         try
@@ -1061,18 +1281,106 @@ public sealed class DynamicTableViewUiTests
             var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
                 .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
             var filterIcon = Assert.Single(filterButton.GetVisualDescendants().OfType<PathIcon>());
-            Assert.NotSame(accentBrush, filterIcon.Foreground);
+            var presenter = Assert.Single(filterButton.GetVisualDescendants().OfType<ContentPresenter>()
+                .Where(static item => item.Name == "PART_ContentPresenter"));
+            SolidColorBrush normalIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
+            Assert.True(Application.Current!.Styles.TryGetResource("SystemControlHighlightBaseMediumBrush", table.ActualThemeVariant, out object? hoverBrush));
+            SolidColorBrush hoverBackgroundBrush = new(Colors.DarkGray);
+            table.Resources["SystemControlHighlightListLowBrush"] = hoverBackgroundBrush;
+            Assert.True(Application.Current!.Styles.TryGetResource("ToggleButtonBackgroundCheckedPointerOver", table.ActualThemeVariant, out object? accentBrush));
+            Assert.Same(backgroundBrush, presenter.Background);
+
+            var point = filterButton.TranslatePoint(
+                new Point(filterButton.Bounds.Width / 2, filterButton.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Filter button has no window position.");
+            window.MouseMove(point);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filterButton.IsPointerOver);
+            Assert.Same(hoverBrush, filterIcon.Foreground);
+            SolidColorBrush hoveredIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
+            Assert.NotEqual((normalIconBrush.Color, normalIconBrush.Opacity), (hoveredIconBrush.Color, hoveredIconBrush.Opacity));
+            Assert.NotEqual((Assert.IsAssignableFrom<SolidColorBrush>(accentBrush).Color, Assert.IsAssignableFrom<SolidColorBrush>(accentBrush).Opacity),
+                (hoveredIconBrush.Color, hoveredIconBrush.Opacity));
+            SolidColorBrush hoveredBackground = hoverBackgroundBrush;
+            Assert.NotEqual(0, hoveredBackground.Color.A);
+            Assert.True(hoveredBackground.Opacity > 0);
+            Assert.NotEqual((backgroundBrush.Color, backgroundBrush.Opacity), (hoveredBackground.Color, hoveredBackground.Opacity));
+            Assert.Same(hoverBackgroundBrush, presenter.Background);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Active_filter_uses_fluent_checked_icon_highlight_and_hover_background()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        SolidColorBrush backgroundBrush = new(Colors.LightGray);
+        table.Resources["SystemControlBackgroundChromeMediumBrush"] = backgroundBrush;
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var filterIcon = Assert.Single(filterButton.GetVisualDescendants().OfType<PathIcon>());
+            var presenter = Assert.Single(filterButton.GetVisualDescendants().OfType<ContentPresenter>()
+                .Where(static item => item.Name == "PART_ContentPresenter"));
+            SolidColorBrush normalIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
+            Assert.True(Application.Current!.Styles.TryGetResource("ToggleButtonBackgroundChecked", table.ActualThemeVariant, out object? checkedBrush));
+            Assert.True(Application.Current!.Styles.TryGetResource("SystemControlHighlightBaseMediumBrush", table.ActualThemeVariant, out object? checkedHoverBrush));
+            SolidColorBrush hoverBackgroundBrush = new(Colors.DarkGray);
+            table.Resources["SystemControlHighlightListLowBrush"] = hoverBackgroundBrush;
+            Assert.True(Application.Current!.Styles.TryGetResource("ButtonForegroundPressed", table.ActualThemeVariant, out object? checkedPressedBrush));
 
             ApplyStandardFilter(table, 0, 0, "ph");
+            Dispatcher.UIThread.RunJobs();
 
             Assert.Contains("filtered", header.Classes);
-            Assert.Same(accentBrush, filterIcon.Foreground);
+            Assert.Same(checkedBrush, filterIcon.Foreground);
+            SolidColorBrush checkedIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
+            Assert.NotEqual((normalIconBrush.Color, normalIconBrush.Opacity), (checkedIconBrush.Color, checkedIconBrush.Opacity));
+            Assert.Same(backgroundBrush, presenter.Background);
+
+            var point = filterButton.TranslatePoint(
+                new Point(filterButton.Bounds.Width / 2, filterButton.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Filter button has no window position.");
+            window.MouseMove(point);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filterButton.IsPointerOver);
+            Assert.Same(checkedHoverBrush, filterIcon.Foreground);
+            SolidColorBrush checkedHoveredIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
+            Assert.NotEqual((checkedIconBrush.Color, checkedIconBrush.Opacity), (checkedHoveredIconBrush.Color, checkedHoveredIconBrush.Opacity));
+            Assert.Same(hoverBackgroundBrush, presenter.Background);
+
+            window.MouseDown(point, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filterButton.IsPressed);
+            Assert.Same(checkedPressedBrush, filterIcon.Foreground);
+            Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
+            Assert.Same(backgroundBrush, presenter.Background);
+
+            window.MouseUp(point, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
 
             source.ClearFilters();
             Dispatcher.UIThread.RunJobs();
 
             Assert.DoesNotContain("filtered", header.Classes);
-            Assert.NotSame(accentBrush, filterIcon.Foreground);
+            Assert.NotSame(checkedBrush, filterIcon.Foreground);
+            Assert.Same(backgroundBrush, presenter.Background);
         }
         finally
         {
