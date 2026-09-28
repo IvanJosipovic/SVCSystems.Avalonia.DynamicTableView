@@ -412,7 +412,8 @@ public sealed partial class DynamicTableView : TableView
             {
                 _selectionDragLast = _selectionDragAnchor;
                 _selectionDragInitialSelection = [.. selection.SelectedIndexes];
-                _selectionDragSelect = !selection.IsSelected(_selectionDragAnchor);
+                _selectionDragSelect = (e.KeyModifiers & KeyModifiers.Control) == 0 ||
+                    !selection.IsSelected(_selectionDragAnchor);
             }
         }
 
