@@ -1,6 +1,4 @@
 using System.Collections.Specialized;
-using System.Collections.ObjectModel;
-using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Subjects;
 using DynamicData;
@@ -13,8 +11,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     where TKey : notnull
 {
     private readonly Func<T, TKey> _keySelector;
-    private readonly Func<T, object> _selectionIdentitySelector;
-    private readonly IEqualityComparer<object> _selectionIdentityComparer;
+    private readonly DynamicTableViewSelectionIdentityMode _selectionIdentityMode;
     private readonly IScheduler _workerScheduler;
     private readonly IScheduler _uiScheduler;
     private readonly IScheduler _searchScheduler;
@@ -23,22 +20,23 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     private readonly BehaviorSubject<Func<T, bool>> _filterSubject = new(static _ => true);
     private readonly BehaviorSubject<IComparer<T>> _sortSubject = new(Comparer<T>.Create(static (_, _) => 0));
     private readonly Dictionary<string, DynamicTableViewFilterDescriptor> _filters = new(StringComparer.Ordinal);
+    private IReadOnlyList<DynamicTableViewFilterDescriptor> _filterDescriptors = Array.AsReadOnly(Array.Empty<DynamicTableViewFilterDescriptor>());
     private readonly Dictionary<string, Func<T, bool>> _customFilters = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Func<T, bool>> _scopeFilters = new(StringComparer.Ordinal);
-    private readonly IdentityPreservingSelectionModel<T, object> _selectionModel;
+    private readonly IIdentityPreservingSelectionModel _selectionModel;
     private readonly IDisposable _searchSubscription;
     private readonly IDisposable _pipelineSubscription;
-    private ObservableCollection<T>? _observedCollection;
-    private SourceCache<T, TKey>? _ownedCache;
-    private Dictionary<TKey, T>? _observedItemsByKey;
-    private IReadOnlyList<DynamicTableViewSortDescriptor> _sortDescriptors = [];
+    private IReadOnlyList<DynamicTableViewSortDescriptor> _sortDescriptors = Array.AsReadOnly(Array.Empty<DynamicTableViewSortDescriptor>());
     private ReadOnlyObservableCollection<T> _items;
     private string _searchText = string.Empty;
     private bool _disposed;
 
-    /// <summary>Creates a source from DynamicData changesets and stable row keys.</summary>
+    /// <summary>Creates a source from a caller-owned, observable DynamicData cache and stable row keys.</summary>
+    /// <param name="keySelector">Returns each row's stable identity. It must be safe to call on the configured worker scheduler.</param>
+    /// <param name="workerScheduler">Schedules query processing and selection identity matching.</param>
+    /// <param name="uiScheduler">Schedules bound collection and selection updates.</param>
     public DynamicTableViewSource(
-        IObservable<IChangeSet<T, TKey>> changes,
+        IObservableCache<T, TKey> cache,
         Func<T, TKey> keySelector,
         IEnumerable<DynamicTableViewColumn<T>>? columns = null,
         IScheduler? workerScheduler = null,
@@ -47,15 +45,10 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         IScheduler? searchScheduler = null,
         DynamicTableViewSourceOptions? options = null)
     {
-        ArgumentNullException.ThrowIfNull(changes);
+        ArgumentNullException.ThrowIfNull(cache);
         _keySelector = keySelector ?? throw new ArgumentNullException(nameof(keySelector));
         options ??= new DynamicTableViewSourceOptions();
-        _selectionIdentitySelector = options.SelectionIdentityMode switch
-        {
-            DynamicTableViewSelectionIdentityMode.Key => item => _keySelector(item)!,
-            DynamicTableViewSelectionIdentityMode.Reference => static item => item,
-            _ => throw new ArgumentOutOfRangeException(nameof(options), options.SelectionIdentityMode, "Unsupported selection identity mode.")
-        };
+        _selectionIdentityMode = options.SelectionIdentityMode;
         _sortSubject.OnNext(BuildComparer([]));
         _workerScheduler = workerScheduler ?? TaskPoolScheduler.Default;
         _uiScheduler = uiScheduler ?? new AvaloniaDispatcherScheduler();
@@ -63,16 +56,15 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         _searchDebounce = searchDebounce ?? TimeSpan.FromMilliseconds(250);
         if (_searchDebounce < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(searchDebounce));
-        _selectionIdentityComparer = options.SelectionIdentityMode == DynamicTableViewSelectionIdentityMode.Reference
-            ? ReferenceEqualityComparer.Instance
-            : EqualityComparer<object>.Default;
-        _selectionModel = new IdentityPreservingSelectionModel<T, object>(
-            _selectionIdentitySelector,
-            _uiScheduler,
-            _selectionIdentityComparer)
+        _selectionModel = _selectionIdentityMode switch
         {
-            SingleSelect = false
+            DynamicTableViewSelectionIdentityMode.Key =>
+                new IdentityPreservingSelectionModel<T, TKey>(_keySelector, _workerScheduler, _uiScheduler),
+            DynamicTableViewSelectionIdentityMode.Reference =>
+                new IdentityPreservingSelectionModel<T, object>(static item => item, _workerScheduler, _uiScheduler, ReferenceEqualityComparer.Instance),
+            _ => throw new ArgumentOutOfRangeException(nameof(options), _selectionIdentityMode, "Unsupported selection identity mode.")
         };
+        _selectionModel.SingleSelect = false;
 
         Columns = [];
         if (columns is not null)
@@ -93,10 +85,10 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
             .Subscribe(_ => UpdateFilterPredicate());
 
 #pragma warning disable IL2091 // DynamicData 9.4.33 annotates SortAndBind<T> with All, but its implementation uses the supplied comparer and does not reflect over row members.
-        _pipelineSubscription = changes
+        _pipelineSubscription = cache.Connect()
             .ObserveOn(_workerScheduler)
-            .Filter(_filterSubject, _filterSubject.Select(static _ => Unit.Default))
-            .SortAndBind(out _items, _sortSubject, new()
+            .Filter(_filterSubject.ObserveOn(_workerScheduler))
+            .SortAndBind(out _items, _sortSubject.ObserveOn(_workerScheduler), new()
             {
                 ResetOnFirstTimeLoad = true,
                 Scheduler = _uiScheduler
@@ -107,33 +99,6 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
 #pragma warning restore IL2091
 
         _selectionModel.SetIdentitySource(_items);
-    }
-
-    /// <summary>Creates a DynamicData source that follows an observable collection.</summary>
-    public static DynamicTableViewSource<T, TKey> FromObservableCollection(
-        ObservableCollection<T> items,
-        Func<T, TKey> keySelector,
-        IEnumerable<DynamicTableViewColumn<T>>? columns = null,
-        IScheduler? workerScheduler = null,
-        IScheduler? uiScheduler = null,
-        DynamicTableViewSourceOptions? options = null)
-    {
-        ArgumentNullException.ThrowIfNull(items);
-        ArgumentNullException.ThrowIfNull(keySelector);
-        SourceCache<T, TKey> cache = new(keySelector);
-        cache.AddOrUpdate(items);
-        DynamicTableViewSource<T, TKey> source = new(
-            cache.Connect(),
-            keySelector,
-            columns,
-            workerScheduler,
-            uiScheduler,
-            options: options);
-        source._observedCollection = items;
-        source._ownedCache = cache;
-        source._observedItemsByKey = CreateKeyMap(items, keySelector);
-        items.CollectionChanged += source.OnObservableCollectionChanged;
-        return source;
     }
 
     /// <inheritdoc />
@@ -166,8 +131,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     public IReadOnlyList<DynamicTableViewSortDescriptor> SortDescriptors => _sortDescriptors;
 
     /// <inheritdoc />
-    public IReadOnlyList<DynamicTableViewFilterDescriptor> FilterDescriptors
-        => _filters.Values.ToArray();
+    public IReadOnlyList<DynamicTableViewFilterDescriptor> FilterDescriptors => _filterDescriptors;
 
     /// <summary>Raised when DynamicData source pipeline fails.</summary>
     public event EventHandler<Exception>? SourceError;
@@ -181,9 +145,15 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         ThrowIfDisposed();
         var key = descriptor?.ColumnKey ?? columnKey ?? throw new ArgumentException("Column key required when clearing a filter.", nameof(columnKey));
         if (descriptor is null)
-            _filters.Remove(key);
+        {
+            if (_filters.Remove(key))
+                _filterDescriptors = Array.AsReadOnly(_filters.Values.ToArray());
+        }
         else
+        {
             _filters[key] = descriptor;
+            _filterDescriptors = Array.AsReadOnly(_filters.Values.ToArray());
+        }
         UpdateFilterPredicate();
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -207,7 +177,11 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         ThrowIfDisposed();
         if (_filters.Count == 0 && _customFilters.Count == 0)
             return;
-        _filters.Clear();
+        if (_filters.Count > 0)
+        {
+            _filters.Clear();
+            _filterDescriptors = Array.AsReadOnly(Array.Empty<DynamicTableViewFilterDescriptor>());
+        }
         _customFilters.Clear();
         UpdateFilterPredicate();
         Changed?.Invoke(this, EventArgs.Empty);
@@ -227,11 +201,11 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     }
 
     /// <inheritdoc />
-    public void SetSort(IReadOnlyList<DynamicTableViewSortDescriptor> descriptors)
+    public void SetSort(DynamicTableViewSortDescriptor[] descriptors)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(descriptors);
-        _sortDescriptors = descriptors.ToArray();
+        _sortDescriptors = Array.AsReadOnly(descriptors);
         _sortSubject.OnNext(BuildComparer(_sortDescriptors));
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -239,7 +213,9 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     /// <inheritdoc />
     public bool AreSameRows(object? first, object? second)
         => first is T typedFirst && second is T typedSecond &&
-           _selectionIdentityComparer.Equals(_selectionIdentitySelector(typedFirst), _selectionIdentitySelector(typedSecond));
+           (_selectionIdentityMode == DynamicTableViewSelectionIdentityMode.Reference
+               ? ReferenceEquals(first, second)
+               : EqualityComparer<TKey>.Default.Equals(_keySelector(typedFirst), _keySelector(typedSecond)));
 
     /// <inheritdoc />
     public void Dispose()
@@ -247,11 +223,6 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         if (_disposed)
             return;
         _disposed = true;
-        if (_observedCollection is not null)
-        {
-            _observedCollection.CollectionChanged -= OnObservableCollectionChanged;
-            _observedCollection = null;
-        }
         Columns.CollectionChanged -= ColumnsOnCollectionChanged;
         _searchSubscription.Dispose();
         _pipelineSubscription.Dispose();
@@ -259,33 +230,6 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         _filterSubject.Dispose();
         _sortSubject.Dispose();
         _selectionModel.Dispose();
-        _ownedCache?.Dispose();
-        _ownedCache = null;
-        GC.SuppressFinalize(this);
-    }
-
-    private void OnObservableCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (_ownedCache is null || _observedCollection is null || _observedItemsByKey is null)
-            return;
-        var updatedItems = CreateKeyMap(_observedCollection, _keySelector);
-        _ownedCache.Edit(updater =>
-        {
-            foreach (var key in _observedItemsByKey.Keys)
-                if (!updatedItems.ContainsKey(key))
-                    updater.RemoveKey(key);
-            foreach (var item in updatedItems.Values)
-                updater.AddOrUpdate(item);
-        });
-        _observedItemsByKey = updatedItems;
-    }
-
-    private static Dictionary<TKey, T> CreateKeyMap(IEnumerable<T> items, Func<T, TKey> keySelector)
-    {
-        var result = new Dictionary<TKey, T>();
-        foreach (var item in items)
-            result[keySelector(item)] = item;
-        return result;
     }
 
     private void ColumnsOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -301,7 +245,10 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         {
             var column = FindColumn(descriptor.ColumnKey);
             if (column is not null)
-                predicates.Add(item => Matches(column.GetValue(item), descriptor));
+            {
+                var columnFilter = column.CreateFilter(descriptor, Matches);
+                predicates.Add(item => columnFilter(item));
+            }
         }
         foreach ((var key, var predicate) in _customFilters)
         {
@@ -363,7 +310,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
             for (var i = 0; i < entries.Count; i++)
             {
                 (var column, var direction) = entries[i];
-                var result = CompareValues(column.GetValue(left), column.GetValue(right));
+                var result = column.CompareRows(left, right, CompareValues);
                 if (result != 0)
                     return direction == ListSortDirection.Ascending ? result : -result;
             }

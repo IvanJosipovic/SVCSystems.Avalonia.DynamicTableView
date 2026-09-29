@@ -59,6 +59,27 @@ public sealed class DynamicTableViewSourceQueryTests
     }
 
     [Fact]
+    public void Sort_takes_descriptor_array_and_exposes_read_only_descriptors()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        var changed = 0;
+        source.Changed += (_, _) => changed++;
+        DynamicTableViewSortDescriptor[] descriptors = [new("age", ListSortDirection.Descending)];
+
+        source.SetSort(descriptors);
+
+        Assert.Equal(new DynamicTableViewSortDescriptor("age", ListSortDirection.Descending),
+            Assert.Single(source.SortDescriptors));
+        Assert.Throws<NotSupportedException>(() =>
+            ((IList<DynamicTableViewSortDescriptor>)source.SortDescriptors)[0] =
+                new("age", ListSortDirection.Ascending));
+        Assert.Equal(["c", "b", "a"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+        Assert.Equal(1, changed);
+    }
+
+    [Fact]
     public void Search_uses_the_configured_debounce_scheduler()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

@@ -18,7 +18,7 @@ public interface IDynamicTableViewSource : IDisposable
     /// <summary>Gets the active sort descriptors in priority order.</summary>
     IReadOnlyList<DynamicTableViewSortDescriptor> SortDescriptors { get; }
 
-    /// <summary>Gets active column filters keyed by column key.</summary>
+    /// <summary>Gets a read-only snapshot of active column filters keyed by column key.</summary>
     IReadOnlyList<DynamicTableViewFilterDescriptor> FilterDescriptors { get; }
 
     /// <summary>Raised when the source's columns, query, or descriptors change.</summary>
@@ -33,10 +33,9 @@ public interface IDynamicTableViewSource : IDisposable
     /// <summary>Sets or replaces an external filter, such as a namespace scope.</summary>
     void SetScopeFilter(string key, Func<object, bool>? predicate);
 
-    /// <summary>Sets the sort descriptors in priority order.</summary>
-    void SetSort(IReadOnlyList<DynamicTableViewSortDescriptor> descriptors);
+    /// <summary>Sets the sort descriptors in priority order, taking ownership of the array. Do not modify it after calling.</summary>
+    void SetSort(DynamicTableViewSortDescriptor[] descriptors);
 
-    /// <summary>Gets the stable identity key for a row.</summary>
     /// <summary>Returns whether two row objects represent the same selected row under the configured identity mode.</summary>
     bool AreSameRows(object? first, object? second);
 }

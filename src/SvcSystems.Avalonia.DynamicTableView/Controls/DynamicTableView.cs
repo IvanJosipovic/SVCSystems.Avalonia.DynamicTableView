@@ -21,6 +21,10 @@ public sealed partial class DynamicTableView : TableView
 
     private readonly Dictionary<string, TableViewColumn> _nativeColumns = new(StringComparer.Ordinal);
     private readonly HashSet<string> _manuallySizedColumns = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _cellSamples = new(StringComparer.Ordinal);
+    private readonly TextBlock _textMeasurer = new();
+    private IReadOnlyList<DynamicTableViewSortDescriptor> _headerSorts = [];
+    private IReadOnlyList<DynamicTableViewFilterDescriptor> _headerFilters = [];
     private IDynamicTableViewSource? _attachedSource;
     private bool _autoWidthPassQueued;
     private bool _headerRefreshQueued;
@@ -100,9 +104,7 @@ public sealed partial class DynamicTableView : TableView
                 var currentIndex = IndexOfColumn(source.Columns, ordered[targetIndex].Key);
                 if (currentIndex < 0 || currentIndex == targetIndex)
                     continue;
-                var column = source.Columns[currentIndex];
-                source.Columns.RemoveAt(currentIndex);
-                source.Columns.Insert(targetIndex, column);
+                source.Columns.Move(currentIndex, targetIndex);
             }
         }
         finally
@@ -126,7 +128,7 @@ public sealed partial class DynamicTableView : TableView
         }
 
         if (!source.SortDescriptors.SequenceEqual(state.Sorts))
-            source.SetSort(state.Sorts);
+            source.SetSort(state.Sorts.ToArray());
 
         if (!source.FilterDescriptors.SequenceEqual(state.Filters))
         {
@@ -174,6 +176,8 @@ public sealed partial class DynamicTableView : TableView
         }
 
         _attachedSource = source;
+        _headerSorts = [];
+        _headerFilters = [];
         if (source is null)
         {
             ItemsSource = null;
@@ -210,7 +214,11 @@ public sealed partial class DynamicTableView : TableView
 
     private void SourceOnChanged(object? sender, EventArgs e)
     {
-        UpdateHeaderStates();
+        if (Source is not { } source)
+            return;
+        if (!source.SortDescriptors.SequenceEqual(_headerSorts) ||
+            !source.FilterDescriptors.SequenceEqual(_headerFilters))
+            UpdateHeaderStates();
         QueueAutoWidthPass();
     }
 
@@ -219,7 +227,38 @@ public sealed partial class DynamicTableView : TableView
         if (_restoringState)
             return;
 
-        RebuildNativeColumns();
+        if (Source is null || e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            RebuildNativeColumns();
+        }
+        else if (e.Action == NotifyCollectionChangedAction.Move)
+        {
+            Columns.Move(e.OldStartingIndex, e.NewStartingIndex);
+        }
+        else
+        {
+            if (e.OldItems is not null)
+            {
+                for (var i = 0; i < e.OldItems.Count; i++)
+                {
+                    var index = e.OldStartingIndex;
+                    var column = Columns[index];
+                    Columns.RemoveAt(index);
+                    _nativeColumns.Remove(((DynamicTableViewColumn)column.Header!).Key);
+                }
+            }
+            if (e.NewItems is not null)
+            {
+                for (var i = 0; i < e.NewItems.Count; i++)
+                {
+                    var definition = (DynamicTableViewColumn)e.NewItems[i]!;
+                    var native = CreateNativeColumn(definition);
+                    _nativeColumns.Add(definition.Key, native);
+                    Columns.Insert(e.NewStartingIndex + i, native);
+                }
+            }
+            UpdateHeaderStates();
+        }
         QueueAutoWidthPass();
     }
 
@@ -232,20 +271,23 @@ public sealed partial class DynamicTableView : TableView
 
         foreach (var definition in Source.Columns)
         {
-            var native = new TableViewColumn
-            {
-                Header = definition,
-                HeaderTemplate = CreateHeaderTemplate(),
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Width = GetInitialWidth(definition),
-                CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(definition), supportsRecycling: true)
-            };
+            var native = CreateNativeColumn(definition);
             _nativeColumns.Add(definition.Key, native);
             Columns.Add(native);
         }
 
         UpdateHeaderStates();
     }
+
+    private TableViewColumn CreateNativeColumn(DynamicTableViewColumn definition)
+        => new()
+        {
+            Header = definition,
+            HeaderTemplate = CreateHeaderTemplate(),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Width = GetInitialWidth(definition),
+            CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(definition), supportsRecycling: true)
+        };
 
     private IDataTemplate CreateHeaderTemplate()
         => new FuncDataTemplate<DynamicTableViewColumn>(
@@ -282,8 +324,12 @@ public sealed partial class DynamicTableView : TableView
     {
         if (Source is null)
             return;
+        var sorts = Source.SortDescriptors;
+        var filters = Source.FilterDescriptors;
+        _headerSorts = sorts;
+        _headerFilters = filters;
         foreach (var header in this.GetVisualDescendants().OfType<DynamicTableViewHeader>())
-            header.UpdateState(Source.SortDescriptors, Source.FilterDescriptors);
+            header.UpdateState(sorts, filters);
     }
 
     internal void UpdateHeaderState(DynamicTableViewHeader header)
@@ -346,6 +392,18 @@ public sealed partial class DynamicTableView : TableView
     {
         if (_autoWidthPassQueued || Source is null || VisualRoot is null)
             return;
+        var needsAutoWidth = false;
+        foreach (var column in Source.Columns)
+        {
+            if (column.WidthMode is DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells or DynamicTableViewWidthMode.Header &&
+                !_manuallySizedColumns.Contains(column.Key))
+            {
+                needsAutoWidth = true;
+                break;
+            }
+        }
+        if (!needsAutoWidth)
+            return;
         _autoWidthPassQueued = true;
         Dispatcher.UIThread.Post(() =>
         {
@@ -358,16 +416,17 @@ public sealed partial class DynamicTableView : TableView
     {
         if (Source is null || VisualRoot is null)
             return;
-        var cellSamples = new Dictionary<string, double>(StringComparer.Ordinal);
+        _cellSamples.Clear();
         foreach (var cell in this.GetVisualDescendants().OfType<TableViewCell>())
         {
             if (cell.Column?.Header is not DynamicTableViewColumn definition || cell.DataContext is not { } row)
                 continue;
-            if (definition.WidthMode == DynamicTableViewWidthMode.Header || _manuallySizedColumns.Contains(definition.Key))
+            if (definition.WidthMode is not (DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) ||
+                _manuallySizedColumns.Contains(definition.Key))
                 continue;
             var measured = MeasureText(definition.GetDisplayValue(row)) + 24;
-            if (!cellSamples.TryGetValue(definition.Key, out var current) || measured > current)
-                cellSamples[definition.Key] = measured;
+            if (!_cellSamples.TryGetValue(definition.Key, out var current) || measured > current)
+                _cellSamples[definition.Key] = measured;
         }
 
         foreach (var definition in Source.Columns)
@@ -377,7 +436,7 @@ public sealed partial class DynamicTableView : TableView
                 continue;
 
             var desired = definition.WidthMode == DynamicTableViewWidthMode.Cells ? definition.MinWidth : MeasureText(definition.Header.ToString()) + 24;
-        if ((definition.WidthMode is DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) && cellSamples.TryGetValue(definition.Key, out var cells))
+            if ((definition.WidthMode is DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) && _cellSamples.TryGetValue(definition.Key, out var cells))
                 desired = Math.Max(desired, cells);
             desired = Math.Max(definition.MinWidth, desired);
             var currentWidth = native.ActualWidth;
@@ -386,11 +445,11 @@ public sealed partial class DynamicTableView : TableView
         }
     }
 
-    private static double MeasureText(string? text)
+    private double MeasureText(string? text)
     {
-        var presenter = new TextBlock { Text = text ?? string.Empty };
-        presenter.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return presenter.DesiredSize.Width;
+        _textMeasurer.Text = text ?? string.Empty;
+        _textMeasurer.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return _textMeasurer.DesiredSize.Width;
     }
 
     private void OnGridPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -495,9 +554,7 @@ public sealed partial class DynamicTableView : TableView
         var targetIndex = Columns.IndexOf(targetHeader.NativeColumn);
         if (targetIndex < 0 || targetIndex == _pointerDownColumn)
             return;
-        var moving = Source.Columns[_pointerDownColumn];
-        Source.Columns.RemoveAt(_pointerDownColumn);
-        Source.Columns.Insert(targetIndex, moving);
+        Source.Columns.Move(_pointerDownColumn, targetIndex);
         _pointerDownColumn = targetIndex;
         e.Handled = true;
     }
@@ -601,7 +658,17 @@ public sealed partial class DynamicTableView : TableView
     {
         if (Source is null)
             return;
-        var current = Source.SortDescriptors.FirstOrDefault(sort => string.Equals(sort.ColumnKey, key, StringComparison.Ordinal));
+        var previous = Source.SortDescriptors;
+        var currentIndex = -1;
+        for (var i = 0; i < previous.Count; i++)
+        {
+            if (string.Equals(previous[i].ColumnKey, key, StringComparison.Ordinal))
+            {
+                currentIndex = i;
+                break;
+            }
+        }
+        var current = currentIndex < 0 ? null : previous[currentIndex];
         if (!AllowMultipleSorts)
         {
             if (current is null)
@@ -613,25 +680,35 @@ public sealed partial class DynamicTableView : TableView
             return;
         }
 
-        var sorts = Source.SortDescriptors.ToList();
+        var sorts = new DynamicTableViewSortDescriptor[previous.Count + (current is null ? 1 : current.Direction == ListSortDirection.Descending ? -1 : 0)];
+        var targetIndex = 0;
+        for (var i = 0; i < previous.Count; i++)
+        {
+            if (i == currentIndex && current?.Direction == ListSortDirection.Descending)
+                continue;
+            sorts[targetIndex++] = i == currentIndex
+                ? previous[i] with { Direction = ListSortDirection.Descending }
+                : previous[i];
+        }
         if (current is null)
-            sorts.Add(new(key, ListSortDirection.Ascending));
-        else if (current.Direction == ListSortDirection.Ascending)
-            sorts[sorts.IndexOf(current)] = current with { Direction = ListSortDirection.Descending };
-        else
-            sorts.Remove(current);
+            sorts[targetIndex] = new(key, ListSortDirection.Ascending);
         Source.SetSort(sorts);
     }
 
     internal FlyoutBase MakeFilterFlyout(DynamicTableViewColumn definition)
     {
-        if (Source is null)
-            return new Flyout();
-        var factory = definition.GetFilterFlyoutFactory();
-        var content = factory is null
-            ? new DynamicTableViewFilterFlyout(definition, Source)
-            : factory(new DynamicTableViewFilterContext(definition, Source));
-        return new Flyout { Content = content };
+        var flyout = new Flyout();
+        flyout.Opening += (_, _) =>
+        {
+            if (flyout.Content is not null)
+                return;
+            var source = Source ?? throw new InvalidOperationException("DynamicTableView has no source.");
+            var factory = definition.GetFilterFlyoutFactory();
+            flyout.Content = factory is null
+                ? new DynamicTableViewFilterFlyout(definition, source)
+                : factory(new DynamicTableViewFilterContext(definition, source));
+        };
+        return flyout;
     }
 
     private DynamicTableViewColumn? FindDefinition(string key)

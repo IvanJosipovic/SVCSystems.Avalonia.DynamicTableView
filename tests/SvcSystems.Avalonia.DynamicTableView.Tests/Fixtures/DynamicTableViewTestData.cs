@@ -29,7 +29,7 @@ public static class DynamicTableViewTestData
         TimeSpan? searchDebounce = null,
         IScheduler? searchScheduler = null,
         DynamicTableViewSourceOptions? options = null)
-        => new(cache.Connect(), static row => row.Id, columns ?? CreateColumns(),
+        => new(cache, static row => row.Id, columns ?? CreateColumns(),
             workerScheduler ?? ImmediateScheduler.Instance, uiScheduler ?? ImmediateScheduler.Instance,
             searchDebounce ?? TimeSpan.Zero, searchScheduler ?? ImmediateScheduler.Instance, options);
 
