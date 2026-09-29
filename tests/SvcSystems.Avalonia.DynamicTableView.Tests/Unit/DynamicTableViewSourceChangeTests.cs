@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
 using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
 using DynamicData;
 using SvcSystems.Avalonia.DynamicTableView.Tests.Fixtures;
 using Microsoft.Reactive.Testing;
@@ -49,6 +50,40 @@ public sealed class DynamicTableViewSourceChangeTests
 
         cache.RemoveKey(updated.Id);
         Assert.Empty(source.Items);
+    }
+
+    [Fact]
+    public void User_selection_during_pending_restore_is_preserved_after_add_and_update()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler uiScheduler = new();
+        using var source = DynamicTableViewTestData.CreateSource(cache, uiScheduler: uiScheduler);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().Count() == 3);
+
+        source.SelectionModel.Select(0);
+        source.SelectionModel.Select(1);
+        Assert.Equal(["a", "b"], GetSelectedIds(source.SelectionModel.SelectedItems));
+
+        var updatedRow = DynamicTableViewTestData.CreateRows()[1] with { Name = "Updated Beta" };
+        var addedRow = new DynamicTableViewTestRow(
+            "d", "Delta", 40, DateTimeOffset.UnixEpoch, false, DynamicTableViewTestState.Pending);
+        cache.Edit(updater =>
+        {
+            updater.AddOrUpdate(updatedRow);
+            updater.AddOrUpdate(addedRow);
+        });
+
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().Any(row => ReferenceEquals(row, addedRow)));
+        var addedRowIndex = source.Items.Cast<DynamicTableViewTestRow>().ToList()
+            .FindIndex(row => row.Id == addedRow.Id);
+        source.SelectionModel.Select(addedRowIndex);
+        Assert.Contains(source.SelectionModel.SelectedItems, item =>
+            item is DynamicTableViewTestRow row && row.Id == addedRow.Id);
+
+        uiScheduler.RunUntilIdle();
+
+        Assert.Equal(["a", "b", "d"], GetSelectedIds(source.SelectionModel.SelectedItems));
     }
 
     [Fact]
@@ -322,4 +357,52 @@ public sealed class DynamicTableViewSourceChangeTests
             .Select(static row => row.Id)
             .Order(StringComparer.Ordinal)
             .ToArray();
+
+    private sealed class ManualScheduler : IScheduler
+    {
+        private readonly Queue<Action> _actions = new();
+
+        public DateTimeOffset Now => DateTimeOffset.UtcNow;
+
+        public IDisposable Schedule<TState>(TState state, Func<IScheduler, TState, IDisposable> action)
+            => Enqueue(() => action(this, state));
+
+        public IDisposable Schedule<TState>(TState state, TimeSpan dueTime,
+            Func<IScheduler, TState, IDisposable> action)
+            => Enqueue(() => action(this, state));
+
+        public IDisposable Schedule<TState>(TState state, DateTimeOffset dueTime,
+            Func<IScheduler, TState, IDisposable> action)
+            => Enqueue(() => action(this, state));
+
+        public void RunUntil(Func<bool> condition)
+        {
+            var steps = 0;
+            while (!condition())
+            {
+                Assert.True(_actions.Count > 0, "Scheduler queue emptied before expected source state arrived.");
+                RunNext();
+                Assert.True(++steps < 1000, "Scheduler exceeded expected work limit.");
+            }
+        }
+
+        public void RunUntilIdle()
+        {
+            var steps = 0;
+            while (_actions.Count > 0)
+            {
+                RunNext();
+                Assert.True(++steps < 1000, "Scheduler exceeded expected work limit.");
+            }
+        }
+
+        private IDisposable Enqueue(Func<IDisposable> action)
+        {
+            _actions.Enqueue(() => action().Dispose());
+            return Disposable.Empty;
+        }
+
+        private void RunNext()
+            => _actions.Dequeue()();
+    }
 }
