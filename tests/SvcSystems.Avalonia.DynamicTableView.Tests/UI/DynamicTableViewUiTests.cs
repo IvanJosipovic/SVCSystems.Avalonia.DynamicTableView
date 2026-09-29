@@ -34,6 +34,101 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Column_add_remove_and_move_keep_unaffected_native_columns()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        var first = table.Columns[0];
+        var second = table.Columns[1];
+        var added = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("extra", "Extra", static row => row.Name);
+
+        source.Columns.Add(added);
+        Assert.Same(first, table.Columns[0]);
+        Assert.Same(second, table.Columns[1]);
+
+        source.Columns.Move(0, 2);
+        Assert.Same(second, table.Columns[0]);
+        Assert.Same(first, table.Columns[2]);
+
+        source.Columns.Remove(added);
+        Assert.Same(second, table.Columns[0]);
+        Assert.Same(first, table.Columns[2]);
+
+        var replacement = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "replacement", "Replacement", static row => row.Name);
+        source.Columns[1] = replacement;
+        Assert.Same(second, table.Columns[0]);
+        Assert.Same(first, table.Columns[2]);
+        Assert.Same(replacement, table.Columns[1].Header);
+        Assert.Equal(source.Columns.Count, table.Columns.Count);
+    }
+
+    [AvaloniaFact]
+    public void Auto_width_pass_only_measures_auto_and_cells_columns()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        var pixelCalls = 0;
+        var starCalls = 0;
+        var autoCalls = 0;
+        var cellsCalls = 0;
+        var pixel = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "pixel", "Pixel", static row => row.Name, row =>
+            {
+                pixelCalls++;
+                return row.Name;
+            });
+        pixel.WidthMode = DynamicTableViewWidthMode.Pixel;
+        pixel.Width = 120;
+        var star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name, row =>
+            {
+                starCalls++;
+                return row.Name;
+            });
+        star.WidthMode = DynamicTableViewWidthMode.Star;
+        var auto = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "auto", "Auto", static row => row.Name, row =>
+            {
+                autoCalls++;
+                return row.Name;
+            });
+        var cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name, row =>
+            {
+                cellsCalls++;
+                return row.Name;
+            });
+        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [pixel, star, auto, cells]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var pixelBefore = pixelCalls;
+            var starBefore = starCalls;
+            var autoBefore = autoCalls;
+            var cellsBefore = cellsCalls;
+
+            window.Height += 10;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(pixelBefore, pixelCalls);
+            Assert.Equal(starBefore, starCalls);
+            Assert.True(autoCalls > autoBefore);
+            Assert.True(cellsCalls > cellsBefore);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Header_and_cell_padding_apply_to_their_content()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -549,7 +644,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = new DynamicTableViewSource<DynamicTableViewTestRow, string>(
-            cache.Connect(),
+            cache,
             static row => row.Id,
             DynamicTableViewTestData.CreateColumns(),
             workerScheduler: ImmediateScheduler.Instance,
@@ -969,6 +1064,38 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Changing_the_only_pixel_column_to_auto_starts_measuring_on_next_layout()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 80;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0] with { Name = new string('W', 100) });
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 900, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(80, table.Columns[0].ActualWidth);
+
+            column.WidthMode = DynamicTableViewWidthMode.Auto;
+            window.Height += 10;
+            Dispatcher.UIThread.RunJobs();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].ActualWidth > 80);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Dragging_a_header_reorders_the_source_and_native_columns()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1047,7 +1174,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = new DynamicTableViewSource<DynamicTableViewTestRow, string>(
-            cache.Connect(),
+            cache,
             static row => row.Id,
             DynamicTableViewTestData.CreateColumns(),
             workerScheduler: ImmediateScheduler.Instance,
@@ -1317,7 +1444,12 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
-        column.FilterFlyoutFactory = static _ => new Border();
+        var factoryCalls = 0;
+        column.FilterFlyoutFactory = _ =>
+        {
+            factoryCalls++;
+            return new Border();
+        };
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         DynamicTableView table = new() { Source = source };
         Window window = new() { Width = 420, Height = 240, Content = table };
@@ -1330,12 +1462,18 @@ public sealed class DynamicTableViewUiTests
             var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
                 .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
             var attachedFlyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            Assert.Equal(0, factoryCalls);
 
             FlyoutBase.ShowAttachedFlyout(filterButton);
             Dispatcher.UIThread.RunJobs();
 
             Assert.True(attachedFlyout.IsOpen);
             Assert.IsType<Border>(attachedFlyout.Content);
+            Assert.Equal(1, factoryCalls);
+            attachedFlyout.Hide();
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, factoryCalls);
         }
         finally
         {

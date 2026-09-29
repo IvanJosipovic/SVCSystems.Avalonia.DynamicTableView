@@ -8,12 +8,13 @@ namespace SvcSystems.Avalonia.DynamicTableView;
 /// Delegates selection operations and state to Avalonia's SelectionModel. Adds only stable-key restoration
 /// around DynamicData view updates, and drops keys that are no longer visible.
 /// </summary>
-internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectionModel, INotifyPropertyChanged, IDisposable
+internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentityPreservingSelectionModel, INotifyPropertyChanged
     where T : notnull
     where TIdentity : notnull
 {
     private readonly SelectionModel<object?> _inner = new();
     private readonly Func<T, TIdentity> _identitySelector;
+    private readonly IScheduler _workerScheduler;
     private readonly IScheduler _uiScheduler;
     private readonly IEqualityComparer<TIdentity> _identityComparer;
     private readonly List<TIdentity> _selectionSnapshot = [];
@@ -22,14 +23,17 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     private INotifyCollectionChanged? _sourceNotifications;
     private IEnumerable? _identitySource;
     private TIdentity[]? _pendingSelectionSnapshot;
+    private bool _restoreCaptureScheduled;
     private int _sourceChangeVersion;
 
     public IdentityPreservingSelectionModel(
         Func<T, TIdentity> identitySelector,
+        IScheduler workerScheduler,
         IScheduler uiScheduler,
         IEqualityComparer<TIdentity>? identityComparer = null)
     {
         _identitySelector = identitySelector ?? throw new ArgumentNullException(nameof(identitySelector));
+        _workerScheduler = workerScheduler ?? throw new ArgumentNullException(nameof(workerScheduler));
         _uiScheduler = uiScheduler ?? throw new ArgumentNullException(nameof(uiScheduler));
         _identityComparer = identityComparer ?? EqualityComparer<TIdentity>.Default;
         _selectionIdentities = new(_identityComparer);
@@ -51,11 +55,11 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                 return;
             }
 
-            _sourceChangeVersion++;
+            Interlocked.Increment(ref _sourceChangeVersion);
             _pendingSelectionSnapshot = null;
             DetachSourceNotifications();
-            AttachSourceNotifications(value as INotifyCollectionChanged);
             _inner.Source = value;
+            AttachSourceNotifications(value as INotifyCollectionChanged);
             ReconcileSelection();
         }
     }
@@ -70,18 +74,22 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
             return;
         }
 
-        _sourceChangeVersion++;
+        Interlocked.Increment(ref _sourceChangeVersion);
         _pendingSelectionSnapshot = null;
         _identitySource = source;
         if (!ReferenceEquals(Source, source))
+        {
             Source = source;
-
-        ReconcileSelection();
+        }
+        else
+        {
+            ReconcileSelection();
+        }
     }
 
     public void Dispose()
     {
-        _sourceChangeVersion++;
+        Interlocked.Increment(ref _sourceChangeVersion);
         _pendingSelectionSnapshot = null;
         DetachSourceNotifications();
 
@@ -101,7 +109,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
             RestorePendingSelection();
             _inner.SingleSelect = value;
-            CaptureVisibleSelection();
+            UpdateSelectionSnapshot();
         }
     }
 
@@ -118,7 +126,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
             RestorePendingSelection();
             _inner.SelectedIndex = value;
-            CaptureVisibleSelection();
+            UpdateSelectionSnapshot();
         }
     }
 
@@ -137,7 +145,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
             RestorePendingSelection();
             _inner.SelectedItem = value;
-            CaptureVisibleSelection();
+            UpdateSelectionSnapshot();
         }
     }
 
@@ -177,40 +185,40 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     {
         RestorePendingSelection();
         _inner.Select(index);
-        CaptureVisibleSelection();
+        UpdateSelectionSnapshot();
     }
 
     public void Deselect(int index)
     {
         RestorePendingSelection();
         _inner.Deselect(index);
-        CaptureVisibleSelection();
+        UpdateSelectionSnapshot();
     }
 
     public void SelectRange(int start, int end)
     {
         RestorePendingSelection();
         _inner.SelectRange(start, end);
-        CaptureVisibleSelection();
+        UpdateSelectionSnapshot();
     }
 
     public void DeselectRange(int start, int end)
     {
         RestorePendingSelection();
         _inner.DeselectRange(start, end);
-        CaptureVisibleSelection();
+        UpdateSelectionSnapshot();
     }
 
     public void SelectAll()
     {
         RestorePendingSelection();
         _inner.SelectAll();
-        CaptureVisibleSelection();
+        UpdateSelectionSnapshot();
     }
 
     public void Clear()
     {
-        _sourceChangeVersion++;
+        Interlocked.Increment(ref _sourceChangeVersion);
         _pendingSelectionSnapshot = null;
         _inner.Clear();
         _selectionSnapshot.Clear();
@@ -242,36 +250,89 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
     private void SourceOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (_selectionSnapshot.Count == 0)
+        if (_selectionSnapshot.Count == 0 && _pendingSelectionSnapshot is null)
         {
             return;
         }
 
-        var snapshot = _selectionSnapshot.ToArray();
-        var version = ++_sourceChangeVersion;
-        _pendingSelectionSnapshot = snapshot;
+        Interlocked.Increment(ref _sourceChangeVersion);
+        _pendingSelectionSnapshot ??= _selectionSnapshot.ToArray();
+        ScheduleRestoreCapture();
+    }
 
-        _uiScheduler.Schedule(snapshot, TimeSpan.Zero, (_, selectedIdentities) =>
+    private void ScheduleRestoreCapture()
+    {
+        if (_restoreCaptureScheduled || _pendingSelectionSnapshot is null)
         {
-            if (version != _sourceChangeVersion)
+            return;
+        }
+
+        _restoreCaptureScheduled = true;
+        _uiScheduler.Schedule(this, TimeSpan.Zero, (_, model) =>
+        {
+            model._restoreCaptureScheduled = false;
+            var selectedIdentities = model._pendingSelectionSnapshot;
+            if (selectedIdentities is null)
             {
                 return Disposable.Empty;
             }
 
-            _pendingSelectionSnapshot = null;
-            RestoreSelectionSnapshot(selectedIdentities);
+            var sourceItems = model.CaptureIdentitySource();
+            var version = Volatile.Read(ref model._sourceChangeVersion);
+            model._workerScheduler.Schedule(
+                (model, selectedIdentities, sourceItems, version),
+                TimeSpan.Zero,
+                (_, work) =>
+                {
+                    var indexes = work.model.FindIndexes(work.selectedIdentities, work.sourceItems);
+                    work.model._uiScheduler.Schedule(
+                        (work.model, work.selectedIdentities, indexes, work.version),
+                        TimeSpan.Zero,
+                        (_, result) =>
+                        {
+                            var currentModel = result.model;
+                            if (result.version != Volatile.Read(ref currentModel._sourceChangeVersion))
+                            {
+                                currentModel.ScheduleRestoreCapture();
+                                return Disposable.Empty;
+                            }
+
+                            if (!ReferenceEquals(currentModel._pendingSelectionSnapshot, result.selectedIdentities))
+                            {
+                                return Disposable.Empty;
+                            }
+
+                            currentModel._pendingSelectionSnapshot = null;
+                            currentModel.RestoreSelectionIndexes(result.indexes);
+                            return Disposable.Empty;
+                        });
+                    return Disposable.Empty;
+                });
             return Disposable.Empty;
         });
     }
 
-    private void RestoreSelectionSnapshot(IReadOnlyList<TIdentity> snapshot)
+    private object?[] CaptureIdentitySource()
     {
-        if (snapshot.Count == 0 || Source is null)
+        var source = _identitySource ?? Source;
+        if (source is IList list)
         {
-            return;
+            var items = new object?[list.Count];
+            list.CopyTo(items, 0);
+            return items;
         }
 
-        var indexes = FindIndexes(snapshot);
+        var result = new List<object?>();
+        foreach (var item in source)
+        {
+            result.Add(item);
+        }
+
+        return result.ToArray();
+    }
+
+    private void RestoreSelectionIndexes(IReadOnlyList<int> indexes)
+    {
         if (indexes.Count == 0)
         {
             _inner.Clear();
@@ -288,26 +349,30 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         using (_inner.BatchUpdate())
         {
             _inner.Clear();
-            if (indexes.Count > 0)
-            {
-                var selectedIndex = indexes.Min();
-                _inner.SelectedIndex = selectedIndex;
+            // FindIndexes walks the source in ascending order, so the first result is
+            // already the minimum and avoids LINQ enumeration overhead.
+            var selectedIndex = indexes[0];
+            _inner.SelectedIndex = selectedIndex;
 
-                foreach (var index in indexes)
-                {
-                    if (index != selectedIndex)
-                    {
-                        _inner.Select(index);
-                    }
-                }
+            foreach (var index in indexes)
+            {
+                if (index != selectedIndex)
+                    _inner.Select(index);
             }
         }
 
         UpdateSelectionSnapshot();
     }
 
-    private void CaptureVisibleSelection()
-        => UpdateSelectionSnapshot(_selectionSnapshot.ToArray());
+    private void RestoreSelectionSnapshot(IReadOnlyList<TIdentity> snapshot)
+    {
+        if (snapshot.Count == 0 || Source is null)
+        {
+            return;
+        }
+
+        RestoreSelectionIndexes(FindIndexes(snapshot));
+    }
 
     private void RestorePendingSelection()
     {
@@ -318,7 +383,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         }
 
         _pendingSelectionSnapshot = null;
-        _sourceChangeVersion++;
+        Interlocked.Increment(ref _sourceChangeVersion);
         RestoreSelectionSnapshot(snapshot);
     }
 
@@ -330,7 +395,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
             return;
         }
 
-        RestoreSelectionSnapshot(_selectionSnapshot.ToArray());
+        RestoreSelectionSnapshot(_selectionSnapshot);
     }
 
     private bool SelectionMatchesIndexes(IReadOnlyList<int> indexes)
@@ -362,7 +427,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                 return false;
             }
 
-            _selectionIdentities.Add(GetIdentity(item));
+            _selectionIdentities.Add(_identitySelector(item));
         }
 
         foreach (var selectedItem in _inner.SelectedItems)
@@ -396,7 +461,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                     continue;
                 }
 
-                if (item is T typedItem && _selectionIdentities.Contains(GetIdentity(typedItem)))
+                if (item is T typedItem && _selectionIdentities.Contains(_identitySelector(typedItem)))
                 {
                     _restoredIndexes.Add(index);
                 }
@@ -408,7 +473,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         var sourceIndex = 0;
         foreach (var item in source)
         {
-            if (item is T typedItem && _selectionIdentities.Contains(GetIdentity(typedItem)))
+            if (item is T typedItem && _selectionIdentities.Contains(_identitySelector(typedItem)))
             {
                 _restoredIndexes.Add(sourceIndex);
             }
@@ -417,6 +482,26 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         }
 
         return _restoredIndexes;
+    }
+
+    private List<int> FindIndexes(IReadOnlyList<TIdentity> snapshot, IReadOnlyList<object?> sourceItems)
+    {
+        HashSet<TIdentity> identities = new(snapshot.Count, _identityComparer);
+        foreach (var identity in snapshot)
+        {
+            identities.Add(identity);
+        }
+
+        List<int> indexes = new(snapshot.Count);
+        for (var index = 0; index < sourceItems.Count; index++)
+        {
+            if (sourceItems[index] is T item && identities.Contains(_identitySelector(item)))
+            {
+                indexes.Add(index);
+            }
+        }
+
+        return indexes;
     }
 
     private bool TryGetIdentity(object? item, out TIdentity identity)
@@ -431,10 +516,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         return true;
     }
 
-    private TIdentity GetIdentity(T typedItem)
-        => _identitySelector(typedItem);
-
-    private void UpdateSelectionSnapshot(IReadOnlyList<TIdentity>? previousSnapshot = null)
+    private void UpdateSelectionSnapshot()
     {
         _selectionSnapshot.Clear();
         _selectionIdentities.Clear();
@@ -442,24 +524,6 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         if (Source is null)
         {
             return;
-        }
-
-        if (previousSnapshot is not null)
-        {
-            foreach (var identity in previousSnapshot)
-                _selectionIdentities.Add(identity);
-
-            foreach (var item in Source)
-            {
-                if (item is T typedItem)
-                    _selectionIdentities.Remove(GetIdentity(typedItem));
-            }
-
-            foreach (var identity in previousSnapshot)
-            {
-                if (_selectionIdentities.Contains(identity))
-                    _selectionSnapshot.Add(identity);
-            }
         }
 
         foreach (var selectedItem in _inner.SelectedItems)

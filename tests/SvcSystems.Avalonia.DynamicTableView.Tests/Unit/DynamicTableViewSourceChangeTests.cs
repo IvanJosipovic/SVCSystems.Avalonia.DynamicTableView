@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Collections.ObjectModel;
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 using DynamicData;
@@ -11,28 +10,114 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.Unit;
 public sealed class DynamicTableViewSourceChangeTests
 {
     [Fact]
-    public void Observable_collection_factory_tracks_add_replace_remove_and_move()
+    public void Source_cache_updates_bound_rows_without_modifying_the_cache()
     {
-        var items = new ObservableCollection<DynamicTableViewTestRow>(DynamicTableViewTestData.CreateRows());
-        using var source =
-            DynamicTableViewSource<DynamicTableViewTestRow, string>.FromObservableCollection(
-                items,
-                static row => row.Id,
-                DynamicTableViewTestData.CreateColumns(),
-                workerScheduler: ImmediateScheduler.Instance,
-                uiScheduler: ImmediateScheduler.Instance);
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        using var source = DynamicTableViewTestData.CreateSource(cache);
 
         Assert.Equal(["a", "b", "c"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
-        items.Add(new("d", "Delta", 40, DateTimeOffset.UnixEpoch, false, DynamicTableViewTestState.Pending));
+        var added = new DynamicTableViewTestRow("d", "Delta", 40, DateTimeOffset.UnixEpoch, false, DynamicTableViewTestState.Pending);
+        cache.AddOrUpdate(added);
         Assert.Equal(["a", "b", "c", "d"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+        Assert.Same(added, cache.Lookup("d").Value);
 
-        items[1] = items[1] with { Name = "Beta 2" };
+        cache.AddOrUpdate(cache.Lookup("b").Value with { Name = "Beta 2" });
         Assert.Equal("Beta 2", source.Items.Cast<DynamicTableViewTestRow>().Single(static row => row.Id == "b").Name);
+        cache.RemoveKey("a");
+        Assert.Equal(["b", "c", "d"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+    }
 
-        items.RemoveAt(0);
-        Assert.Equal(["b", "c", "d"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
-        items.Move(2, 0);
-        Assert.Equal(["b", "c", "d"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+    [Fact]
+    public void Accepts_read_only_observable_cache_interface()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> owner = new(static row => row.Id);
+        IObservableCache<DynamicTableViewTestRow, string> cache = owner;
+        using DynamicTableViewSource<DynamicTableViewTestRow, string> source = new(
+            cache, static row => row.Id, workerScheduler: ImmediateScheduler.Instance,
+            uiScheduler: ImmediateScheduler.Instance);
+
+        var row = DynamicTableViewTestData.CreateRows()[0];
+        owner.AddOrUpdate(row);
+
+        Assert.Same(row, Assert.Single(source.Items.Cast<DynamicTableViewTestRow>()));
+    }
+
+    [Fact]
+    public void Disposing_source_leaves_caller_cache_usable()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using (var source = DynamicTableViewTestData.CreateSource(cache))
+            cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+
+        var next = DynamicTableViewTestData.CreateRows()[1];
+        cache.AddOrUpdate(next);
+        Assert.Same(next, cache.Lookup(next.Id).Value);
+    }
+
+    [Fact]
+    public void Query_changes_wait_for_worker_before_recomputing_bound_rows()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler worker = new();
+        using var source = DynamicTableViewTestData.CreateSource(
+            cache, workerScheduler: worker, uiScheduler: ImmediateScheduler.Instance);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        worker.RunUntilIdle();
+
+        source.SetFilter(new("age", DynamicTableViewFilterOperator.GreaterThan, 15));
+        Assert.Equal(3, source.Items.Cast<DynamicTableViewTestRow>().Count());
+        worker.RunUntilIdle();
+        Assert.Equal(2, source.Items.Cast<DynamicTableViewTestRow>().Count());
+
+        source.SetSort([new("age", ListSortDirection.Descending)]);
+        Assert.Equal("b", source.Items.Cast<DynamicTableViewTestRow>().First().Id);
+        worker.RunUntilIdle();
+        Assert.Equal("c", source.Items.Cast<DynamicTableViewTestRow>().First().Id);
+    }
+
+    [Fact]
+    public void Value_type_key_identity_restores_replaced_row_without_changing_selection()
+    {
+        using SourceCache<DynamicTableViewTestRow, int> cache = new(static row => row.Age);
+        using DynamicTableViewSource<DynamicTableViewTestRow, int> source = new(
+            cache, static row => row.Age, workerScheduler: ImmediateScheduler.Instance,
+            uiScheduler: ImmediateScheduler.Instance);
+        var original = DynamicTableViewTestData.CreateRows()[1];
+        cache.AddOrUpdate(original);
+        source.SelectionModel.Select(0);
+
+        var replacement = original with { Name = "Updated" };
+        cache.AddOrUpdate(replacement);
+
+        Assert.Same(replacement, Assert.Single(source.SelectionModel.SelectedItems));
+        Assert.True(source.AreSameRows(original, replacement));
+    }
+
+    [Fact]
+    public void Selection_identity_scan_runs_on_worker_after_ui_source_snapshot()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler worker = new();
+        ManualScheduler ui = new();
+        using var source = DynamicTableViewTestData.CreateSource(
+            cache, workerScheduler: worker, uiScheduler: ui);
+        var original = DynamicTableViewTestData.CreateRows()[1];
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        worker.RunUntilIdle();
+        ui.RunUntilIdle();
+        source.SelectionModel.Select(1);
+
+        var replacement = original with { Name = "Updated" };
+        cache.AddOrUpdate(replacement);
+        worker.RunUntilIdle();
+        ui.RunUntilIdle();
+
+        Assert.True(worker.PendingCount > 0);
+        worker.RunUntilIdle();
+        ui.RunUntilIdle();
+
+        Assert.Same(replacement, Assert.Single(source.SelectionModel.SelectedItems));
     }
 
     [Fact]
@@ -414,30 +499,24 @@ public sealed class DynamicTableViewSourceChangeTests
     }
 
     [Fact]
-    public void Observable_collection_replace_move_add_and_remove_keep_only_existing_selected_identities()
+    public void Cache_replace_add_and_remove_keep_only_existing_selected_identities()
     {
         var initialRows = CreateIndexedRows(10);
-        ObservableCollection<DynamicTableViewTestRow> items = new(initialRows);
-        using var source = DynamicTableViewSource<DynamicTableViewTestRow, string>.FromObservableCollection(
-            items,
-            static row => row.Id,
-            DynamicTableViewTestData.CreateColumns(),
-            workerScheduler: ImmediateScheduler.Instance,
-            uiScheduler: ImmediateScheduler.Instance);
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(initialRows);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
         source.SelectionModel.Select(1);
         source.SelectionModel.Select(4);
         source.SelectionModel.Select(8);
 
         var replacement = initialRows[1] with { Name = "Replacement" };
-        items[1] = replacement;
+        cache.AddOrUpdate(replacement);
         Assert.Equal(["row-01", "row-04", "row-08"], GetSelectedIds(source.SelectionModel.SelectedItems));
         Assert.Contains(source.SelectionModel.SelectedItems, selected => ReferenceEquals(selected, replacement));
 
-        items.Move(8, 0);
+        cache.AddOrUpdate(new DynamicTableViewTestRow("row-10", "Row 10", 10, DateTimeOffset.UnixEpoch, true, DynamicTableViewTestState.Ready));
         Assert.Equal(["row-01", "row-04", "row-08"], GetSelectedIds(source.SelectionModel.SelectedItems));
-        items.Add(new("row-10", "Row 10", 10, DateTimeOffset.UnixEpoch, true, DynamicTableViewTestState.Ready));
-        Assert.Equal(["row-01", "row-04", "row-08"], GetSelectedIds(source.SelectionModel.SelectedItems));
-        items.Remove(items.Single(static row => row.Id == "row-04"));
+        cache.RemoveKey("row-04");
 
         Assert.Equal(["row-01", "row-08"], GetSelectedIds(source.SelectionModel.SelectedItems));
         Assert.Contains(source.SelectionModel.SelectedItems, selected => ReferenceEquals(selected, replacement));
@@ -554,6 +633,8 @@ public sealed class DynamicTableViewSourceChangeTests
     private sealed class ManualScheduler : IScheduler
     {
         private readonly Queue<Action> _actions = new();
+
+        public int PendingCount => _actions.Count;
 
         public DateTimeOffset Now => DateTimeOffset.UtcNow;
 

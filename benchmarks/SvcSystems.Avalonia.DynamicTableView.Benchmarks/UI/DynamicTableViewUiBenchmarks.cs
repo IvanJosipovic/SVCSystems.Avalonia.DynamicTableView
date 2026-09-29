@@ -24,6 +24,7 @@ public class DynamicTableViewUiBenchmarks : IDisposable
     private Button _filterButton = null!;
     private int _contextTargetCount;
     private bool _longName;
+    private bool _fixedWidths;
 
     [Params(100, 1_000, 10_000)]
     public int RowCount { get; set; }
@@ -36,7 +37,7 @@ public class DynamicTableViewUiBenchmarks : IDisposable
             .SetupWithoutStarting();
 
         _cache = new(static row => row.Id);
-        _source = new(_cache.Connect(), static row => row.Id, CreateColumns(),
+        _source = new(_cache, static row => row.Id, CreateColumns(),
             ImmediateScheduler.Instance, ImmediateScheduler.Instance, TimeSpan.Zero);
         var rows = new DynamicTableViewBenchmarkRow[RowCount];
         for (var index = 0; index < rows.Length; index++)
@@ -90,6 +91,32 @@ public class DynamicTableViewUiBenchmarks : IDisposable
         _cache.AddOrUpdate(current with { Name = _longName ? new string('W', 200) : $"Item {current.Id:D5}" });
         Dispatcher.UIThread.RunJobs();
         return _table.Columns[1].ActualWidth;
+    }
+
+    [Benchmark]
+    public double FixedWidthAfterSourceUpdate()
+    {
+        if (!_fixedWidths)
+        {
+            for (var index = 0; index < _source.Columns.Count; index++)
+                _source.Columns[index].WidthMode = DynamicTableViewWidthMode.Pixel;
+            _fixedWidths = true;
+        }
+        _longName = !_longName;
+        var visibleRow = _table.GetVisualDescendants().OfType<TableViewRow>().First();
+        var current = (DynamicTableViewBenchmarkRow)visibleRow.DataContext!;
+        _cache.AddOrUpdate(current with { Name = _longName ? new string('W', 200) : $"Item {current.Id:D5}" });
+        Dispatcher.UIThread.RunJobs();
+        return _table.Columns[1].ActualWidth;
+    }
+
+    [Benchmark]
+    public int MoveColumn()
+    {
+        _source.Columns.Move(4, 5);
+        _source.Columns.Move(5, 4);
+        Dispatcher.UIThread.RunJobs();
+        return _table.Columns.Count;
     }
 
     [Benchmark]

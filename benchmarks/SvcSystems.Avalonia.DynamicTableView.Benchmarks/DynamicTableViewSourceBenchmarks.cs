@@ -21,7 +21,7 @@ public class DynamicTableViewSourceBenchmarks : IDisposable
     {
         _cache = new(static row => row.Id);
         var columns = CreateColumns();
-        _source = new(_cache.Connect(), static row => row.Id, columns, ImmediateScheduler.Instance, ImmediateScheduler.Instance, TimeSpan.Zero);
+        _source = new(_cache, static row => row.Id, columns, ImmediateScheduler.Instance, ImmediateScheduler.Instance, TimeSpan.Zero);
         var rows = new DynamicTableViewBenchmarkRow[RowCount];
         for (var i = 0; i < rows.Length; i++)
             rows[i] = new(i, $"Item {i:D5}", i % 101, i % 2 == 0);
@@ -61,6 +61,14 @@ public class DynamicTableViewSourceBenchmarks : IDisposable
         _source.SetFilter(new("score", DynamicTableViewFilterOperator.GreaterThanOrEqual, 50));
         return _source.Items.Cast<DynamicTableViewBenchmarkRow>().Count();
     }
+
+    [IterationSetup(Target = nameof(ReadFilterDescriptors))]
+    public void SetupFilterDescriptorRead()
+        => _source.SetFilter(new("score", DynamicTableViewFilterOperator.GreaterThanOrEqual, 50));
+
+    [Benchmark]
+    public int ReadFilterDescriptors()
+        => _source.FilterDescriptors.Count;
 
     [Benchmark]
     public int Search()

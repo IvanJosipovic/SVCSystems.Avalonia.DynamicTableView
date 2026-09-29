@@ -47,6 +47,14 @@ public abstract class DynamicTableViewColumn
 
     internal abstract object? GetValue(object item);
 
+    internal virtual int CompareRows(object left, object right, Func<object?, object?, int> compare)
+        => compare(GetValue(left), GetValue(right));
+
+    internal virtual Func<object, bool> CreateFilter(
+        DynamicTableViewFilterDescriptor descriptor,
+        Func<object?, DynamicTableViewFilterDescriptor, bool> matches)
+        => item => matches(GetValue(item), descriptor);
+
     internal abstract string GetDisplayValue(object item);
 
     internal virtual Func<DynamicTableViewFilterContext, Control>? GetFilterFlyoutFactory() => null;
