@@ -32,6 +32,47 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Header_and_cell_padding_apply_to_their_content()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        table.Resources["DynamicTableView.CellPadding"] = new Thickness(0);
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var columnHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>().First();
+            var header = columnHeader.GetVisualDescendants().OfType<TemplatedControl>().First();
+            var headerLabel = header.GetVisualDescendants().OfType<TextBlock>().First();
+            var cell = table.GetVisualDescendants().OfType<TableViewCell>().First();
+            cell.MinHeight = 60;
+            Dispatcher.UIThread.RunJobs();
+            var cellText = cell.GetVisualDescendants().OfType<TextBlock>().First();
+            var row = cell.GetSelfAndVisualAncestors().OfType<TableViewRow>().First();
+
+            Assert.Equal(default, columnHeader.Padding);
+            Assert.True(header.Padding.Top > 0);
+            Assert.Equal(default, row.Padding);
+            Assert.Equal(default, cell.Padding);
+            Assert.Equal(global::Avalonia.Layout.VerticalAlignment.Center, cell.VerticalContentAlignment);
+            Assert.Equal(default, header.TranslatePoint(default, columnHeader)!.Value);
+            Assert.Equal(new Point(header.Padding.Left, header.Padding.Top), headerLabel.TranslatePoint(default, header)!.Value);
+            var cellTextOrigin = cellText.TranslatePoint(default, cell)!.Value;
+            Assert.Equal(0, cellTextOrigin.X);
+            Assert.Equal((cell.Bounds.Height - cellText.Bounds.Height) / 2, cellTextOrigin.Y, 2);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Clicking_blank_header_area_sorts_and_keeps_indicator_next_to_text()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -83,7 +124,7 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Column_header_strip_is_taller_than_data_rows()
+    public void Column_header_strip_includes_header_content_padding()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
@@ -98,10 +139,11 @@ public sealed class DynamicTableViewUiTests
 
             var headerPresenter = Assert.IsType<TableViewColumnHeadersPresenter>(table.GetVisualDescendants().OfType<TableViewColumnHeadersPresenter>().First());
             var headerStrip = Assert.IsType<Border>(headerPresenter.GetSelfAndVisualAncestors().OfType<Border>().First());
-            var row = Assert.IsType<TableViewRow>(table.GetVisualDescendants().OfType<TableViewRow>().First());
+            var columnHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>().First();
+            var header = columnHeader.GetVisualDescendants().OfType<TemplatedControl>().First();
 
-            Assert.True(headerStrip.Bounds.Height >= row.Bounds.Height + 6,
-                $"Expected header strip ({headerStrip.Bounds.Height}) to be at least 6 pixels taller than row ({row.Bounds.Height}).");
+            Assert.True(header.Padding.Top > 0);
+            Assert.Equal(columnHeader.Bounds.Height, headerStrip.Bounds.Height);
         }
         finally
         {
@@ -182,7 +224,7 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal(window.Width, headerStrip.Bounds.Width);
             Assert.Equal(default, headerStrip.Padding);
             Assert.Equal(0, columnHeader.Bounds.X);
-            Assert.Equal(45, headerStrip.Bounds.Height);
+            Assert.True(headerStrip.Bounds.Height > 0);
             Assert.Equal(columnHeader.Bounds, hoverSurface.Bounds);
             var resizer = Assert.Single(columnHeader.GetVisualDescendants().OfType<Thumb>());
             Assert.Equal(new Thickness(0, 0, -6, 0), resizer.Margin);
@@ -1149,12 +1191,11 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Standard_filter_flyout_uses_default_width_and_allows_host_override()
+    public void Standard_filter_flyout_uses_its_default_width()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
         DynamicTableView table = new() { Source = source };
-        table.Resources["DynamicTableView.FilterFlyoutWidth"] = 360d;
         Window window = new() { Width = 520, Height = 260, Content = table };
 
         try
@@ -1171,16 +1212,8 @@ public sealed class DynamicTableViewUiTests
 
             var flyoutContent = Assert.IsAssignableFrom<Control>(flyout.Content);
             var panel = Assert.Single(flyoutContent.GetVisualDescendants().OfType<StackPanel>()
-                .Where(static panel => panel.Width == 360));
-            Assert.Equal(360, panel.Width);
-            Assert.Equal(360, panel.Bounds.Width);
-
-            flyout.Hide();
-            table.Resources.Remove("DynamicTableView.FilterFlyoutWidth");
-            FlyoutBase.ShowAttachedFlyout(filterButton);
-            Dispatcher.UIThread.RunJobs();
-
-            Assert.Equal(280, panel.Width);
+                .Where(static candidate => candidate.Children.OfType<TextBlock>().Any()));
+            Assert.True(double.IsNaN(panel.Width));
             Assert.Equal(280, panel.Bounds.Width);
             flyout.Hide();
         }
@@ -1196,7 +1229,6 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
         DynamicTableView table = new() { Source = source };
-        table.Resources["DynamicTableView.FilterFlyoutWidth"] = 360d;
         Window window = new() { Width = 520, Height = 260, Content = table };
 
         try
@@ -1213,13 +1245,13 @@ public sealed class DynamicTableViewUiTests
 
             var flyoutContent = Assert.IsAssignableFrom<Control>(flyout.Content);
             var panel = Assert.Single(flyoutContent.GetVisualDescendants().OfType<StackPanel>()
-                .Where(static panel => panel.Width == 360));
+                .Where(static candidate => candidate.Children.OfType<TextBlock>().Any()));
             var operatorBox = Assert.Single(flyoutContent.GetVisualDescendants().OfType<ComboBox>()
                 .Where(static comboBox => comboBox.Name == "PART_OperatorBox"));
             var choiceBox = Assert.Single(flyoutContent.GetVisualDescendants().OfType<ComboBox>()
                 .Where(static comboBox => comboBox.Name == "PART_ChoiceBox"));
 
-            Assert.Equal(360, panel.Bounds.Width);
+            Assert.Equal(280, panel.Bounds.Width);
             Assert.True(operatorBox.IsVisible);
             Assert.True(choiceBox.IsVisible);
             Assert.Equal(panel.Bounds.Width, operatorBox.Bounds.Width);

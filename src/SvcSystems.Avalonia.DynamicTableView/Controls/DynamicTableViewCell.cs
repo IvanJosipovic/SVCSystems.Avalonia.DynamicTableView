@@ -10,6 +10,7 @@ internal sealed partial class DynamicTableViewCell : ContentControl
     public DynamicTableViewCell(DynamicTableViewColumn column)
     {
         _column = column ?? throw new ArgumentNullException(nameof(column));
+        ContentTemplate = column.CellTemplate;
         Classes.Add("dynamic-table-view-cell");
         DataContextChanged += OnDataContextChanged;
     }
@@ -30,7 +31,12 @@ internal sealed partial class DynamicTableViewCell : ContentControl
     }
 
     private void UpdateText()
-        => Content = DataContext is { } item ? _column.GetDisplayValue(item) : string.Empty;
+    {
+        var item = DataContext;
+        var text = item is not null ? _column.GetDisplayValue(item) : string.Empty;
+        Content = _column.CellTemplate is null ? text : item;
+        ToolTip.SetTip(this, text);
+    }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {

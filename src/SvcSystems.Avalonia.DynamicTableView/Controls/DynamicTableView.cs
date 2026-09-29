@@ -238,7 +238,7 @@ public sealed partial class DynamicTableView : TableView
                 HeaderTemplate = CreateHeaderTemplate(),
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Width = GetInitialWidth(definition),
-                CellTemplate = definition.CellTemplate ?? new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(definition), supportsRecycling: true)
+                CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(definition), supportsRecycling: true)
             };
             _nativeColumns.Add(definition.Key, native);
             Columns.Add(native);

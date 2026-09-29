@@ -4,6 +4,8 @@ namespace SvcSystems.Avalonia.DynamicTableView;
 
 internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
 {
+    private const double DefaultWidth = 280;
+
     private readonly DynamicTableViewColumn _column;
     private readonly IDynamicTableViewSource _source;
     private readonly bool _isBoolean;
@@ -17,6 +19,7 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
 
     public DynamicTableViewFilterFlyout(DynamicTableViewColumn column, IDynamicTableViewSource source)
     {
+        Width = DefaultWidth;
         _column = column ?? throw new ArgumentNullException(nameof(column));
         _source = source ?? throw new ArgumentNullException(nameof(source));
         ColumnHeader = column.Header.ToString() ?? string.Empty;
