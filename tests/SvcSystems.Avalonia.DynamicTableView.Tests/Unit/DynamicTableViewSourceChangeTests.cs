@@ -87,6 +87,28 @@ public sealed class DynamicTableViewSourceChangeTests
     }
 
     [Fact]
+    public void Explicit_clear_during_pending_restore_does_not_restore_old_selection()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler uiScheduler = new();
+        using var source = DynamicTableViewTestData.CreateSource(cache, uiScheduler: uiScheduler);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().Count() == 3);
+        source.SelectionModel.Select(0);
+        source.SelectionModel.Select(1);
+
+        var updatedRow = DynamicTableViewTestData.CreateRows()[1] with { Name = "Updated Beta" };
+        cache.AddOrUpdate(updatedRow);
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>()
+            .Any(row => ReferenceEquals(row, updatedRow)));
+        source.SelectionModel.Clear();
+
+        uiScheduler.RunUntilIdle();
+
+        Assert.Empty(source.SelectionModel.SelectedItems);
+    }
+
+    [Fact]
     public void Dynamic_columns_raise_changed_and_update_search_and_filter_behavior()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
