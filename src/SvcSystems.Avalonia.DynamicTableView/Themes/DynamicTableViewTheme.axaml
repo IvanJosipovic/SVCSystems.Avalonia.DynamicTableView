@@ -6,8 +6,9 @@
     <x:Double x:Key="DynamicTableView.FlyoutSpacing">4</x:Double>
     <x:Double x:Key="DynamicTableView.FilterFlyoutWidth">280</x:Double>
     <Thickness x:Key="DynamicTableView.HeaderButtonPadding">4,0</Thickness>
+    <Thickness x:Key="DynamicTableView.HeaderPadding">4,6,4,6</Thickness>
+    <Thickness x:Key="DynamicTableView.CellPadding">4</Thickness>
     <x:Double x:Key="DynamicTableView.HeaderIconSize">12</x:Double>
-    <x:Double x:Key="DynamicTableView.HeaderMinHeight">45</x:Double>
     <!-- Microsoft Fluent System Icons (MIT); source: microsoft/fluentui-system-icons. -->
     <StreamGeometry x:Key="DynamicTableView.SortAscendingGeometry">M7.14645 2.14645C7.34171 1.95118 7.65829 1.95118 7.85355 2.14645L10.8536 5.14645C11.0488 5.34171 11.0488 5.65829 10.8536 5.85355C10.6583 6.04882 10.3417 6.04882 10.1464 5.85355L8 3.70711V13.5C8 13.7761 7.77614 14 7.5 14C7.22386 14 7 13.7761 7 13.5V3.70711L4.85355 5.85355C4.65829 6.04882 4.34171 6.04882 4.14645 5.85355C3.95118 5.65829 3.95118 5.34171 4.14645 5.14645L7.14645 2.14645Z</StreamGeometry>
     <StreamGeometry x:Key="DynamicTableView.SortDescendingGeometry">M7.14645 13.8536C7.34171 14.0488 7.65829 14.0488 7.85355 13.8536L10.8536 10.8536C11.0488 10.6583 11.0488 10.3417 10.8536 10.1464C10.6583 9.95118 10.3417 9.95118 10.1464 10.1464L8 12.2929V2.5C8 2.22386 7.77614 2 7.5 2C7.22386 2 7 2.22386 7 2.5V12.2929L4.85355 10.1464C4.65829 9.95118 4.34171 9.95118 4.14645 10.1464C3.95118 10.3417 3.95118 10.6583 4.14645 10.8536L7.14645 13.8536Z</StreamGeometry>
@@ -17,10 +18,24 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="Template">
       <ControlTemplate>
-        <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Stretch" Background="Transparent">
-          <StackPanel Orientation="Horizontal" Spacing="4" Margin="4,0" VerticalAlignment="Center" ClipToBounds="True">
-              <TextBlock Text="{TemplateBinding HeaderText}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-              <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+        <Border Padding="{TemplateBinding Padding}" Background="Transparent">
+          <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Stretch" Background="Transparent">
+            <Grid Grid.Column="0"
+                  ColumnDefinitions="Auto,*"
+                  HorizontalAlignment="Stretch"
+                  ClipToBounds="True">
+              <TextBlock Grid.Column="0"
+                         Text="{TemplateBinding HeaderText}"
+                         ToolTip.Tip="{TemplateBinding HeaderText}"
+                         TextTrimming="CharacterEllipsis"
+                         MinWidth="0"
+                         VerticalAlignment="Center" />
+              <StackPanel Grid.Column="1"
+                          Orientation="Horizontal"
+                          Margin="4,0"
+                          HorizontalAlignment="Left"
+                          VerticalAlignment="Center"
+                          IsVisible="{TemplateBinding HasSort}">
                 <PathIcon Data="{StaticResource DynamicTableView.SortAscendingGeometry}"
                           Width="{DynamicResource DynamicTableView.HeaderIconSize}"
                           Height="{DynamicResource DynamicTableView.HeaderIconSize}"
@@ -30,34 +45,36 @@
                           Height="{DynamicResource DynamicTableView.HeaderIconSize}"
                           IsVisible="{TemplateBinding IsSortDescending}" />
                 <TextBlock Text="{TemplateBinding SortText}"
-                           IsVisible="{TemplateBinding HasSort}"
                            VerticalAlignment="Center" />
               </StackPanel>
-          </StackPanel>
-          <Button Name="PART_FilterButton"
-                  Grid.Column="1"
-                  Classes="dynamic-table-view-filter-button"
-                  Padding="{DynamicResource DynamicTableView.HeaderButtonPadding}"
-                  HorizontalAlignment="Right"
-                  AutomationProperties.Name="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
-                  ToolTip.Tip="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
-                  IsVisible="{TemplateBinding IsFilterEnabled}">
-            <PathIcon Data="{StaticResource DynamicTableView.FilterGeometry}"
-                      Classes="dynamic-table-view-filter-icon"
-                      Width="{DynamicResource DynamicTableView.HeaderIconSize}"
-                      Height="{DynamicResource DynamicTableView.HeaderIconSize}"
-                      VerticalAlignment="Center" />
-          </Button>
-        </Grid>
+            </Grid>
+            <Button Name="PART_FilterButton"
+                    Grid.Column="1"
+                    Classes="dynamic-table-view-filter-button"
+                    Padding="{DynamicResource DynamicTableView.HeaderButtonPadding}"
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
+                    ToolTip.Tip="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
+                    IsVisible="{TemplateBinding IsFilterEnabled}">
+              <PathIcon Data="{StaticResource DynamicTableView.FilterGeometry}"
+                        Classes="dynamic-table-view-filter-icon"
+                        Width="{DynamicResource DynamicTableView.HeaderIconSize}"
+                        Height="{DynamicResource DynamicTableView.HeaderIconSize}"
+                        VerticalAlignment="Center" />
+            </Button>
+          </Grid>
+        </Border>
       </ControlTemplate>
     </Setter>
   </ControlTheme>
 
   <ControlTheme x:Key="{x:Type local:DynamicTableViewFilterFlyout}" TargetType="local:DynamicTableViewFilterFlyout">
+    <Setter Property="Width" Value="{DynamicResource DynamicTableView.FilterFlyoutWidth}" />
     <Setter Property="Template">
       <ControlTemplate>
         <StackPanel Spacing="{DynamicResource DynamicTableView.FlyoutSpacing}"
-                    Width="{DynamicResource DynamicTableView.FilterFlyoutWidth}">
+                    Width="{DynamicResource DynamicTableView.FilterFlyoutWidth}"
+                    HorizontalAlignment="Stretch">
           <TextBlock Text="{TemplateBinding ColumnHeader}" FontWeight="SemiBold" />
           <ComboBox Name="PART_OperatorBox"
                     HorizontalAlignment="Stretch"
@@ -90,6 +107,7 @@
           </ComboBox>
           <ListBox Name="PART_MultipleChoiceBox"
                    HorizontalAlignment="Stretch"
+                   MaxHeight="240"
                    ItemsSource="{TemplateBinding FilterChoices}"
                    SelectionMode="Multiple"
                    IsVisible="{TemplateBinding IsMultiChoiceInputVisible}">
@@ -110,35 +128,35 @@
   </Styles.Resources>
 
   <Style Selector="Button.dynamic-table-view-filter-button">
-    <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <Style Selector="Button.dynamic-table-view-filter-button /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <Style Selector="Button.dynamic-table-view-filter-button:pointerover">
-    <Setter Property="Background" Value="{DynamicResource SystemControlHighlightListLowBrush}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <Style Selector="Button.dynamic-table-view-filter-button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SystemControlHighlightListLowBrush}" />
-  </Style>
-
-  <Style Selector="Button.dynamic-table-view-filter-button:pointerover PathIcon.dynamic-table-view-filter-icon">
-    <Setter Property="Foreground" Value="{DynamicResource SystemControlHighlightBaseMediumBrush}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <Style Selector="Button.dynamic-table-view-filter-button:pressed /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
-  <Style Selector="Button.dynamic-table-view-filter-button:focus:not(:pointerover) /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
+  <Style Selector="Button.dynamic-table-view-filter-button:focus /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <Style Selector="Button.dynamic-table-view-filter-button:focus-visible:not(:pointerover) /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
+  </Style>
+
+  <Style Selector="Button.dynamic-table-view-filter-button:pointerover PathIcon.dynamic-table-view-filter-icon">
+    <Setter Property="Foreground" Value="{DynamicResource SystemControlHighlightBaseMediumBrush}" />
   </Style>
 
   <Style Selector="local|DynamicTableViewHeader.filtered /template/ PathIcon.dynamic-table-view-filter-icon">
@@ -153,14 +171,22 @@
     <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundPressed}" />
   </Style>
 
-  <Style Selector="TableView.dynamic-table-view TableViewColumnHeader">
-    <Setter Property="MinHeight" Value="{DynamicResource DynamicTableView.HeaderMinHeight}" />
-    <Setter Property="VerticalContentAlignment" Value="Stretch" />
-    <Setter Property="Background" Value="Transparent" />
+  <Style Selector="TableView.dynamic-table-view local|DynamicTableViewHeader">
+    <Setter Property="Padding" Value="{DynamicResource DynamicTableView.HeaderPadding}" />
   </Style>
 
-  <Style Selector="TableView.dynamic-table-view TableViewColumnHeadersPresenter">
-    <Setter Property="MinHeight" Value="{DynamicResource DynamicTableView.HeaderMinHeight}" />
+  <Style Selector="TableView.dynamic-table-view TableViewColumnHeader">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+  </Style>
+
+  <Style Selector="TableView.dynamic-table-view TableViewCell">
+    <Setter Property="Padding" Value="{DynamicResource DynamicTableView.CellPadding}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="TableView.dynamic-table-view TableViewRow">
+    <Setter Property="Padding" Value="0" />
   </Style>
 
   <Style Selector="TableView.dynamic-table-view /template/ ScrollViewer#PART_ScrollViewer /template/ DockPanel#ContentPanel &gt; Border">
@@ -169,6 +195,10 @@
 
   <Style Selector="TableView.dynamic-table-view TableViewColumnHeader /template/ Thumb#PART_Resizer">
     <Setter Property="Margin" Value="0,0,-6,0" />
+  </Style>
+
+  <Style Selector="TableView.dynamic-table-view TableViewColumnHeader /template/ Thumb#PART_Resizer /template/ Rectangle">
+    <Setter Property="IsVisible" Value="False" />
   </Style>
 
   <Style Selector="TableView.dynamic-table-view TableViewColumnHeader:pointerover:not(.filter-button-pointerover) /template/ ContentPresenter#PART_ContentPresenter">
@@ -193,7 +223,6 @@
     <Setter Property="BorderBrush" Value="{DynamicResource TableViewColumnHeaderSeparatorBackground}" />
     <Setter Property="BorderThickness" Value="0,0,1,0" />
   </Style>
-
   <Style Selector="TableView.dynamic-table-view.grid-lines-all TableViewCell">
     <Setter Property="BorderBrush" Value="{DynamicResource TableViewColumnHeaderSeparatorBackground}" />
     <Setter Property="BorderThickness" Value="0,0,1,0" />

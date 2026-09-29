@@ -13,8 +13,9 @@
 - Keep column header labels and interactions available after the table detaches and reattaches; preserve restored column order and widths across that transition.
 - Mouse drag across rows selects the contiguous range when starting on an unselected row and deselects it when starting on a selected row; moving back restores rows outside current range to their initial selection state.
 - Keep grid separators controlled by the styleable `GridLinesVisibility` property. Only set borders when separators are enabled; use Fluent's `TableViewColumnHeaderSeparatorBackground` resource instead of defining grid-line colors in the library. Hosts can override the Fluent resource when needed.
-- Keep the default header strip at least 6 pixels taller than Fluent data rows through `DynamicTableView.HeaderMinHeight`; preserve Fluent's column-header template and do not alter row sizing for this distinction.
-- Keep standard filter flyouts at the default 280-pixel width through the overridable `DynamicTableView.FilterFlyoutWidth` theme resource.
+- Keep column-header height content-driven so it scales with inherited font size. Add symmetric vertical header padding rather than a fixed minimum height; preserve Fluent's column-header template and do not alter row sizing.
+- Keep header and cell spacing configurable through `DynamicTableView.HeaderPadding` (default `4,6,4,6`) and `DynamicTableView.CellPadding` (default `4`) theme resources. Apply header padding inside `DynamicTableViewHeader`; set `TableViewRow.Padding` to zero so `TableViewCell.Padding` controls cell content inset. Vertically center cell content.
+- Keep standard filter flyouts at a default width of 280 pixels. Constrain long multi-choice lists to a scrollable maximum height.
 - Keep keyboard shortcuts and tap actions caller-owned. Consumers use Avalonia `KeyBindings`, `Tapped`, and `DoubleTapped` directly; do not bake application actions or key meanings into the control.
 - Every public API and retained feature must have focused tests in `tests/SvcSystems.Avalonia.DynamicTableView.Tests`.
 - Keep benchmarks isolated in `benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks` and reference this library only.

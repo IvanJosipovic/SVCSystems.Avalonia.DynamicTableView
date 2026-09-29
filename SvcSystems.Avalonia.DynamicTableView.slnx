@@ -7,6 +7,5 @@
   <Project Path="src/SvcSystems.Avalonia.DynamicTableView/SvcSystems.Avalonia.DynamicTableView.csproj" />
   <Project Path="samples/SvcSystems.Avalonia.DynamicTableView.Sample/SvcSystems.Avalonia.DynamicTableView.Sample.csproj" />
   <Project Path="tests/SvcSystems.Avalonia.DynamicTableView.Tests/SvcSystems.Avalonia.DynamicTableView.Tests.csproj" />
-  <Project Path="tests/SvcSystems.Avalonia.DynamicTableView.Rendering.Tests/SvcSystems.Avalonia.DynamicTableView.Rendering.Tests.csproj" />
   <Project Path="benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks.csproj" />
 </Solution>
