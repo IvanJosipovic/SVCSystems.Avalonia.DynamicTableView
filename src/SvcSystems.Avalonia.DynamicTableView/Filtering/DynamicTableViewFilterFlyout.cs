@@ -19,7 +19,7 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
 
     public DynamicTableViewFilterFlyout(DynamicTableViewColumn column, IDynamicTableViewSource source)
     {
-        Width = DefaultWidth;
+        MinWidth = DefaultWidth;
         _column = column ?? throw new ArgumentNullException(nameof(column));
         _source = source ?? throw new ArgumentNullException(nameof(source));
         ColumnHeader = column.Header.ToString() ?? string.Empty;

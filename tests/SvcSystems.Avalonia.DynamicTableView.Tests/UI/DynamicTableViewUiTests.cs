@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Templates;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -73,6 +74,72 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Header_and_cell_padding_use_the_documented_defaults()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(Application.Current!.Styles.TryGetResource(
+                "DynamicTableView.HeaderPadding", table.ActualThemeVariant, out object? headerPadding));
+            Assert.True(Application.Current.Styles.TryGetResource(
+                "DynamicTableView.CellPadding", table.ActualThemeVariant, out object? cellPadding));
+
+            Assert.Equal(new Thickness(4, 6, 4, 6), Assert.IsType<Thickness>(headerPadding));
+            Assert.Equal(new Thickness(4), Assert.IsType<Thickness>(cellPadding));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Custom_cell_template_receives_row_and_preserves_display_tooltip()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewTestRow row = DynamicTableViewTestData.CreateRows()[0];
+        cache.AddOrUpdate(row);
+        IDataTemplate template = new FuncDataTemplate<DynamicTableViewTestRow>(
+            static (item, _) => new TextBlock { Text = item is null ? string.Empty : $"Template: {item.Name}" },
+            supportsRecycling: true);
+        DynamicTableViewColumn<DynamicTableViewTestRow> templatedColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "templated", "Templated", static item => item.Name, static item => $"Display: {item.Name}", template);
+        DynamicTableViewColumn<DynamicTableViewTestRow> fallbackColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "fallback", "Fallback", static item => item.Name, static item => $"Fallback: {item.Name}");
+        using var source = DynamicTableViewTestData.CreateSource(cache, [templatedColumn, fallbackColumn]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            ContentControl templatedCell = table.GetVisualDescendants().OfType<ContentControl>()
+                .Single(control => Equals(ToolTip.GetTip(control), $"Display: {row.Name}"));
+            ContentControl fallbackCell = table.GetVisualDescendants().OfType<ContentControl>()
+                .Single(control => Equals(ToolTip.GetTip(control), $"Fallback: {row.Name}"));
+            TextBlock templatedText = Assert.Single(templatedCell.GetVisualDescendants().OfType<TextBlock>());
+
+            Assert.Same(row, templatedCell.Content);
+            Assert.Equal($"Template: {row.Name}", templatedText.Text);
+            Assert.Equal($"Fallback: {row.Name}", fallbackCell.Content);
+            Assert.Equal($"Fallback: {row.Name}", ToolTip.GetTip(fallbackCell));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Clicking_blank_header_area_sorts_and_keeps_indicator_next_to_text()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -115,6 +182,7 @@ public sealed class DynamicTableViewUiTests
             var labelOrigin = label.TranslatePoint(default, header)!.Value;
             var sortIconOrigin = sortIcon.TranslatePoint(default, header)!.Value;
             Assert.True(sortIconOrigin.X >= labelOrigin.X + label.DesiredSize.Width);
+            Assert.True(sortIconOrigin.X <= labelOrigin.X + label.Bounds.Width + 4);
             Assert.True(sortIconOrigin.X < filterOrigin.X);
         }
         finally
@@ -1213,8 +1281,43 @@ public sealed class DynamicTableViewUiTests
             var flyoutContent = Assert.IsAssignableFrom<Control>(flyout.Content);
             var panel = Assert.Single(flyoutContent.GetVisualDescendants().OfType<StackPanel>()
                 .Where(static candidate => candidate.Children.OfType<TextBlock>().Any()));
-            Assert.True(double.IsNaN(panel.Width));
+            Assert.Equal(280, panel.Width);
             Assert.Equal(280, panel.Bounds.Width);
+            flyout.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Standard_filter_flyout_uses_table_width_override()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        table.Resources["DynamicTableView.FilterFlyoutWidth"] = 360d;
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+
+            var content = Assert.IsAssignableFrom<Control>(flyout.Content);
+            var panel = Assert.Single(content.GetVisualDescendants().OfType<StackPanel>()
+                .Where(static candidate => candidate.Children.OfType<TextBlock>().Any()));
+
+            Assert.Equal(360, panel.Width);
+            Assert.Equal(360, panel.Bounds.Width);
             flyout.Hide();
         }
         finally
@@ -1272,6 +1375,57 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Standard_multi_choice_filter_caps_list_height_and_remains_scrollable()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        column.FilterChoices = Enumerable.Range(0, 40)
+            .Select(static index => new DynamicTableViewFilterChoice($"Choice {index}", $"value-{index}"))
+            .ToArray();
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 800, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+
+            var content = Assert.IsAssignableFrom<Control>(flyout.Content);
+            var operatorBox = Assert.Single(content.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_OperatorBox"));
+            operatorBox.SelectedIndex = 2;
+            Dispatcher.UIThread.RunJobs();
+
+            var choices = Assert.Single(content.GetVisualDescendants().OfType<ListBox>()
+                .Where(static listBox => listBox.Name == "PART_MultipleChoiceBox"));
+            var scrollViewer = Assert.Single(choices.GetVisualDescendants().OfType<ScrollViewer>());
+
+            Assert.True(choices.IsVisible);
+            Assert.Equal(240, choices.MaxHeight);
+            Assert.Equal(240, choices.Bounds.Height);
+            Assert.True(scrollViewer.Extent.Height > scrollViewer.Viewport.Height);
+            scrollViewer.Offset = new Vector(scrollViewer.Offset.X, scrollViewer.Extent.Height);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(scrollViewer.Offset.Y > 0);
+            flyout.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Standard_text_and_numeric_filter_flyouts_apply_typed_values()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1301,14 +1455,12 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Filter_button_uses_fluent_hover_background_and_icon_highlight()
+    public void Filter_button_background_stays_transparent_while_icon_highlights_on_hover()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
-        SolidColorBrush backgroundBrush = new(Colors.LightGray);
-        table.Resources["SystemControlBackgroundChromeMediumBrush"] = backgroundBrush;
         Window window = new() { Width = 520, Height = 260, Content = table };
 
         try
@@ -1324,10 +1476,8 @@ public sealed class DynamicTableViewUiTests
                 .Where(static item => item.Name == "PART_ContentPresenter"));
             SolidColorBrush normalIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
             Assert.True(Application.Current!.Styles.TryGetResource("SystemControlHighlightBaseMediumBrush", table.ActualThemeVariant, out object? hoverBrush));
-            SolidColorBrush hoverBackgroundBrush = new(Colors.DarkGray);
-            table.Resources["SystemControlHighlightListLowBrush"] = hoverBackgroundBrush;
             Assert.True(Application.Current!.Styles.TryGetResource("ToggleButtonBackgroundCheckedPointerOver", table.ActualThemeVariant, out object? accentBrush));
-            Assert.Same(backgroundBrush, presenter.Background);
+            AssertFilterButtonBackgroundIsTransparent(presenter);
 
             var point = filterButton.TranslatePoint(
                 new Point(filterButton.Bounds.Width / 2, filterButton.Bounds.Height / 2), window)
@@ -1341,11 +1491,7 @@ public sealed class DynamicTableViewUiTests
             Assert.NotEqual((normalIconBrush.Color, normalIconBrush.Opacity), (hoveredIconBrush.Color, hoveredIconBrush.Opacity));
             Assert.NotEqual((Assert.IsAssignableFrom<SolidColorBrush>(accentBrush).Color, Assert.IsAssignableFrom<SolidColorBrush>(accentBrush).Opacity),
                 (hoveredIconBrush.Color, hoveredIconBrush.Opacity));
-            SolidColorBrush hoveredBackground = hoverBackgroundBrush;
-            Assert.NotEqual(0, hoveredBackground.Color.A);
-            Assert.True(hoveredBackground.Opacity > 0);
-            Assert.NotEqual((backgroundBrush.Color, backgroundBrush.Opacity), (hoveredBackground.Color, hoveredBackground.Opacity));
-            Assert.Same(hoverBackgroundBrush, presenter.Background);
+            AssertFilterButtonBackgroundIsTransparent(presenter);
         }
         finally
         {
@@ -1354,14 +1500,48 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Active_filter_uses_fluent_checked_icon_highlight_and_hover_background()
+    public void Keyboard_focused_filter_button_keeps_a_visible_focus_background()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        SolidColorBrush focusBrush = new(Colors.LightGray);
+        table.Resources["SystemControlBackgroundChromeMediumBrush"] = focusBrush;
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var presenter = Assert.Single(filterButton.GetVisualDescendants().OfType<ContentPresenter>()
+                .Where(static item => item.Name == "PART_ContentPresenter"));
+
+            window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, null);
+            Assert.True(filterButton.Focus());
+            window.MouseMove(new Point(window.Bounds.Width - 2, window.Bounds.Height - 2));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filterButton.IsFocused);
+            Assert.False(filterButton.IsPointerOver);
+            Assert.Same(focusBrush, presenter.Background);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Active_filter_keeps_transparent_button_background_and_highlights_icon()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
-        SolidColorBrush backgroundBrush = new(Colors.LightGray);
-        table.Resources["SystemControlBackgroundChromeMediumBrush"] = backgroundBrush;
         Window window = new() { Width = 520, Height = 260, Content = table };
 
         try
@@ -1378,8 +1558,6 @@ public sealed class DynamicTableViewUiTests
             SolidColorBrush normalIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
             Assert.True(Application.Current!.Styles.TryGetResource("ToggleButtonBackgroundChecked", table.ActualThemeVariant, out object? checkedBrush));
             Assert.True(Application.Current!.Styles.TryGetResource("SystemControlHighlightBaseMediumBrush", table.ActualThemeVariant, out object? checkedHoverBrush));
-            SolidColorBrush hoverBackgroundBrush = new(Colors.DarkGray);
-            table.Resources["SystemControlHighlightListLowBrush"] = hoverBackgroundBrush;
             Assert.True(Application.Current!.Styles.TryGetResource("ButtonForegroundPressed", table.ActualThemeVariant, out object? checkedPressedBrush));
 
             ApplyStandardFilter(table, 0, 0, "ph");
@@ -1389,7 +1567,7 @@ public sealed class DynamicTableViewUiTests
             Assert.Same(checkedBrush, filterIcon.Foreground);
             SolidColorBrush checkedIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
             Assert.NotEqual((normalIconBrush.Color, normalIconBrush.Opacity), (checkedIconBrush.Color, checkedIconBrush.Opacity));
-            Assert.Same(backgroundBrush, presenter.Background);
+            AssertFilterButtonBackgroundIsTransparent(presenter);
 
             var point = filterButton.TranslatePoint(
                 new Point(filterButton.Bounds.Width / 2, filterButton.Bounds.Height / 2), window)
@@ -1401,7 +1579,7 @@ public sealed class DynamicTableViewUiTests
             Assert.Same(checkedHoverBrush, filterIcon.Foreground);
             SolidColorBrush checkedHoveredIconBrush = Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
             Assert.NotEqual((checkedIconBrush.Color, checkedIconBrush.Opacity), (checkedHoveredIconBrush.Color, checkedHoveredIconBrush.Opacity));
-            Assert.Same(hoverBackgroundBrush, presenter.Background);
+            AssertFilterButtonBackgroundIsTransparent(presenter);
 
             window.MouseDown(point, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
@@ -1409,7 +1587,7 @@ public sealed class DynamicTableViewUiTests
             Assert.True(filterButton.IsPressed);
             Assert.Same(checkedPressedBrush, filterIcon.Foreground);
             Assert.IsAssignableFrom<SolidColorBrush>(filterIcon.Foreground);
-            Assert.Same(backgroundBrush, presenter.Background);
+            AssertFilterButtonBackgroundIsTransparent(presenter);
 
             window.MouseUp(point, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
@@ -1419,7 +1597,7 @@ public sealed class DynamicTableViewUiTests
 
             Assert.DoesNotContain("filtered", header.Classes);
             Assert.NotSame(checkedBrush, filterIcon.Foreground);
-            Assert.Same(backgroundBrush, presenter.Background);
+            AssertFilterButtonBackgroundIsTransparent(presenter);
         }
         finally
         {
@@ -1503,6 +1681,9 @@ public sealed class DynamicTableViewUiTests
         => table.GetVisualDescendants().OfType<TableViewColumnHeader>()
             .Single(header => ReferenceEquals(header.Column, table.Columns[columnIndex]))
             .GetVisualDescendants().OfType<TemplatedControl>().First();
+
+    private static void AssertFilterButtonBackgroundIsTransparent(ContentPresenter presenter)
+        => Assert.Equal(Colors.Transparent, Assert.IsAssignableFrom<ISolidColorBrush>(presenter.Background).Color);
 
     private static void ApplyStandardFilter(DynamicTableView table, int columnIndex, int operatorIndex, string firstValue)
     {
