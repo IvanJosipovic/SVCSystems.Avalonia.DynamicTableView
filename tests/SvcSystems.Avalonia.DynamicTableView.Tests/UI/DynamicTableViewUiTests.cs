@@ -1204,6 +1204,55 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Sort_arrow_stays_beside_filter_button_in_a_narrow_header()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = column.MinWidth;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 240, Height = 240, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Name == "PART_FilterButton"));
+
+            for (int click = 0; click < 2; click++)
+            {
+                ClickHeader(window, header, 5);
+                Dispatcher.UIThread.RunJobs();
+
+                PathIcon sortArrow = Assert.Single(header.GetVisualDescendants().OfType<PathIcon>()
+                    .Where(static icon => icon.IsVisible && !icon.Classes.Contains("dynamic-table-view-filter-icon")));
+                ListSortDirection expectedDirection = click == 0
+                    ? ListSortDirection.Ascending
+                    : ListSortDirection.Descending;
+                Assert.Equal(expectedDirection, Assert.Single(source.SortDescriptors).Direction);
+
+                Point sortArrowPosition = sortArrow.TranslatePoint(default, header)
+                    ?? throw new InvalidOperationException("Sort arrow has no header position.");
+                Point filterButtonPosition = filterButton.TranslatePoint(default, header)
+                    ?? throw new InvalidOperationException("Filter button has no header position.");
+
+                Assert.True(filterButton.IsVisible);
+                Assert.True(sortArrowPosition.X >= 0);
+                Assert.True(sortArrowPosition.X + sortArrow.Bounds.Width <= filterButtonPosition.X);
+                Assert.True(filterButtonPosition.X + filterButton.Bounds.Width <= header.Bounds.Width);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Multiple_sorts_are_disabled_by_default_and_the_clicked_column_replaces_the_previous_sort()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

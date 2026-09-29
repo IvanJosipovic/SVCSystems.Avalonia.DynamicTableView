@@ -20,20 +20,17 @@
       <ControlTemplate>
         <Border Padding="{TemplateBinding Padding}" Background="Transparent">
           <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Stretch" Background="Transparent">
-            <Grid Grid.Column="0"
-                  ColumnDefinitions="Auto,*"
-                  HorizontalAlignment="Stretch"
-                  ClipToBounds="True">
-              <TextBlock Grid.Column="0"
-                         Text="{TemplateBinding HeaderText}"
-                         ToolTip.Tip="{TemplateBinding HeaderText}"
-                         TextTrimming="CharacterEllipsis"
-                         MinWidth="0"
-                         VerticalAlignment="Center" />
-              <StackPanel Grid.Column="1"
-                          Orientation="Horizontal"
-                          Margin="4,0"
-                          HorizontalAlignment="Left"
+            <TextBlock Grid.Column="0"
+                       Text="{TemplateBinding HeaderText}"
+                       ToolTip.Tip="{TemplateBinding HeaderText}"
+                       TextTrimming="CharacterEllipsis"
+                       MinWidth="0"
+                       VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal"
+                          Margin="0"
                           VerticalAlignment="Center"
                           IsVisible="{TemplateBinding HasSort}">
                 <PathIcon Data="{StaticResource DynamicTableView.SortAscendingGeometry}"
@@ -47,21 +44,19 @@
                 <TextBlock Text="{TemplateBinding SortText}"
                            VerticalAlignment="Center" />
               </StackPanel>
-            </Grid>
-            <Button Name="PART_FilterButton"
-                    Grid.Column="1"
-                    Classes="dynamic-table-view-filter-button"
-                    Padding="{DynamicResource DynamicTableView.HeaderButtonPadding}"
-                    HorizontalAlignment="Right"
-                    AutomationProperties.Name="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
-                    ToolTip.Tip="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
-                    IsVisible="{TemplateBinding IsFilterEnabled}">
-              <PathIcon Data="{StaticResource DynamicTableView.FilterGeometry}"
-                        Classes="dynamic-table-view-filter-icon"
-                        Width="{DynamicResource DynamicTableView.HeaderIconSize}"
-                        Height="{DynamicResource DynamicTableView.HeaderIconSize}"
-                        VerticalAlignment="Center" />
-            </Button>
+              <Button Name="PART_FilterButton"
+                      Classes="dynamic-table-view-filter-button"
+                      Padding="{DynamicResource DynamicTableView.HeaderButtonPadding}"
+                      AutomationProperties.Name="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
+                      ToolTip.Tip="{x:Static local:DynamicTableViewResources.FilterAccessibleName}"
+                      IsVisible="{TemplateBinding IsFilterEnabled}">
+                <PathIcon Data="{StaticResource DynamicTableView.FilterGeometry}"
+                          Classes="dynamic-table-view-filter-icon"
+                          Width="{DynamicResource DynamicTableView.HeaderIconSize}"
+                          Height="{DynamicResource DynamicTableView.HeaderIconSize}"
+                          VerticalAlignment="Center" />
+              </Button>
+            </StackPanel>
           </Grid>
         </Border>
       </ControlTemplate>
