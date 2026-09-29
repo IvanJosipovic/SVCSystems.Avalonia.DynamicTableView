@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Shapes;
 using Avalonia.Controls.Templates;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -295,7 +296,8 @@ public sealed class DynamicTableViewUiTests
             Assert.True(headerStrip.Bounds.Height > 0);
             Assert.Equal(columnHeader.Bounds, hoverSurface.Bounds);
             var resizer = Assert.Single(columnHeader.GetVisualDescendants().OfType<Thumb>());
-            Assert.Equal(new Thickness(0, 0, -6, 0), resizer.Margin);
+            Assert.Equal(new Thickness(0), resizer.Margin);
+            Assert.Equal(7, resizer.Bounds.Width);
             Assert.Equal(0, resizer.Bounds.Y);
             Assert.Equal(columnHeader.Bounds.Height, resizer.Bounds.Height);
             Assert.Equal(headerStrip.Bounds.Height, columnHeader.Bounds.Height);
@@ -788,6 +790,40 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Resize_grip_shows_resize_cursor_when_hovered()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source, GridLinesVisibility = DynamicTableViewGridLinesVisibility.All };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var header = table.GetVisualDescendants().OfType<TableViewColumnHeader>().First();
+            var resizer = Assert.Single(header.GetVisualDescendants().OfType<Thumb>());
+            var gripLine = Assert.Single(resizer.GetVisualDescendants().OfType<Rectangle>());
+            Assert.True(gripLine.IsVisible);
+            var linePosition = gripLine.TranslatePoint(new Point(gripLine.Bounds.Width / 2, gripLine.Bounds.Height / 2), header)
+                ?? throw new InvalidOperationException("Resize line has no header position.");
+            Assert.InRange(linePosition.X, header.Bounds.Width - 1, header.Bounds.Width);
+            var point = header.TranslatePoint(linePosition, window)
+                ?? throw new InvalidOperationException("Resize line has no window position.");
+
+            window.MouseMove(point);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(resizer.IsPointerOver);
+            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), resizer.Cursor?.ToString());
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Resizing_a_star_column_manually_saves_and_restores_it_as_pixels()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1160,6 +1196,55 @@ public sealed class DynamicTableViewUiTests
 
             ClickHeader(window, nameHeader, 12);
             Assert.Equal(["a", "b", "c"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Sort_arrow_stays_beside_filter_button_in_a_narrow_header()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = column.MinWidth;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 240, Height = 240, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Name == "PART_FilterButton"));
+
+            for (int click = 0; click < 2; click++)
+            {
+                ClickHeader(window, header, 5);
+                Dispatcher.UIThread.RunJobs();
+
+                PathIcon sortArrow = Assert.Single(header.GetVisualDescendants().OfType<PathIcon>()
+                    .Where(static icon => icon.IsVisible && !icon.Classes.Contains("dynamic-table-view-filter-icon")));
+                ListSortDirection expectedDirection = click == 0
+                    ? ListSortDirection.Ascending
+                    : ListSortDirection.Descending;
+                Assert.Equal(expectedDirection, Assert.Single(source.SortDescriptors).Direction);
+
+                Point sortArrowPosition = sortArrow.TranslatePoint(default, header)
+                    ?? throw new InvalidOperationException("Sort arrow has no header position.");
+                Point filterButtonPosition = filterButton.TranslatePoint(default, header)
+                    ?? throw new InvalidOperationException("Filter button has no header position.");
+
+                Assert.True(filterButton.IsVisible);
+                Assert.True(sortArrowPosition.X >= 0);
+                Assert.True(sortArrowPosition.X + sortArrow.Bounds.Width <= filterButtonPosition.X);
+                Assert.True(filterButtonPosition.X + filterButton.Bounds.Width <= header.Bounds.Width);
+            }
         }
         finally
         {

@@ -42,7 +42,7 @@
       <Grid Margin="8" RowDefinitions="Auto,Auto,*" RowSpacing="10">
         <TextBlock Text="Kubernetes workload rows" FontSize="20" FontWeight="SemiBold" />
         <TextBlock Grid.Row="1" Text="Sort by a header. Use its filter button to filter rows." />
-        <table:DynamicTableView x:Name="XamlTable" Grid.Row="2" />
+        <table:DynamicTableView x:Name="XamlTable" Grid.Row="2" GridLinesVisibility="All" />
       </Grid>
     </TabItem>
     <TabItem Header="C# view and columns">
