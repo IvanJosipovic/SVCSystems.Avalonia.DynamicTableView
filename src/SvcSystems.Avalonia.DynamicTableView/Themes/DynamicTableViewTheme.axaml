@@ -85,10 +85,18 @@
                    PlaceholderText="{x:Static local:DynamicTableViewResources.FilterValue}"
                    Text="{Binding FirstValueText, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                    IsVisible="{TemplateBinding IsValueInputVisible}" />
+          <NumericUpDown Name="PART_NumericValueBox"
+                         PlaceholderText="{x:Static local:DynamicTableViewResources.FilterValue}"
+                         Value="{Binding FirstNumericValue, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                         IsVisible="{TemplateBinding IsNumericValueInputVisible}" />
           <TextBox Name="PART_SecondValueBox"
                    PlaceholderText="{x:Static local:DynamicTableViewResources.FilterSecondValue}"
                    Text="{Binding SecondValueText, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                    IsVisible="{TemplateBinding IsSecondValueInputVisible}" />
+          <NumericUpDown Name="PART_NumericSecondValueBox"
+                         PlaceholderText="{x:Static local:DynamicTableViewResources.FilterSecondValue}"
+                         Value="{Binding SecondNumericValue, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                         IsVisible="{TemplateBinding IsNumericSecondValueInputVisible}" />
           <ComboBox Name="PART_ChoiceBox"
                     HorizontalAlignment="Stretch"
                     ItemsSource="{TemplateBinding FilterChoices}"

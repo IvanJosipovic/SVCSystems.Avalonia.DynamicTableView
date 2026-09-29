@@ -6,6 +6,9 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="FilterValue" xml:space="preserve"><value>Value</value></data>
   <data name="FilterSecondValue" xml:space="preserve"><value>Second value</value></data>
+  <data name="FilterValidationRequired" xml:space="preserve"><value>Enter a value.</value></data>
+  <data name="FilterValidationNumber" xml:space="preserve"><value>Enter a valid number.</value></data>
+  <data name="FilterValidationDate" xml:space="preserve"><value>Enter a valid date.</value></data>
   <data name="FilterApply" xml:space="preserve"><value>Apply</value></data>
   <data name="FilterClear" xml:space="preserve"><value>Clear</value></data>
   <data name="FilterAccessibleName" xml:space="preserve"><value>Filter options</value></data>

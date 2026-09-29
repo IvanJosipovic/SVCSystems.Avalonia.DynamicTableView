@@ -18,6 +18,15 @@ public static class DynamicTableViewResources
     /// <summary>Gets the second filter value prompt.</summary>
     public static string FilterSecondValue => GetString(nameof(FilterSecondValue));
 
+    /// <summary>Gets the required filter value validation message.</summary>
+    public static string FilterValidationRequired => GetString(nameof(FilterValidationRequired));
+
+    /// <summary>Gets the invalid numeric filter value validation message.</summary>
+    public static string FilterValidationNumber => GetString(nameof(FilterValidationNumber));
+
+    /// <summary>Gets the invalid date filter value validation message.</summary>
+    public static string FilterValidationDate => GetString(nameof(FilterValidationDate));
+
     /// <summary>Gets the apply filter label.</summary>
     public static string FilterApply => GetString(nameof(FilterApply));
 
