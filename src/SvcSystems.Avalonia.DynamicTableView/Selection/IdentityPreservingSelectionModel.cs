@@ -21,6 +21,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     private readonly List<int> _restoredIndexes = [];
     private INotifyCollectionChanged? _sourceNotifications;
     private IEnumerable? _identitySource;
+    private TIdentity[]? _pendingSelectionSnapshot;
     private int _sourceChangeVersion;
 
     public IdentityPreservingSelectionModel(
@@ -50,6 +51,8 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                 return;
             }
 
+            _sourceChangeVersion++;
+            _pendingSelectionSnapshot = null;
             DetachSourceNotifications();
             AttachSourceNotifications(value as INotifyCollectionChanged);
             _inner.Source = value;
@@ -68,6 +71,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
         }
 
         _sourceChangeVersion++;
+        _pendingSelectionSnapshot = null;
         _identitySource = source;
         if (!ReferenceEquals(Source, source))
             Source = source;
@@ -77,6 +81,8 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
     public void Dispose()
     {
+        _sourceChangeVersion++;
+        _pendingSelectionSnapshot = null;
         DetachSourceNotifications();
 
         _identitySource = null;
@@ -86,7 +92,17 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     public bool SingleSelect
     {
         get => _inner.SingleSelect;
-        set => _inner.SingleSelect = value;
+        set
+        {
+            if (_inner.SingleSelect == value)
+            {
+                return;
+            }
+
+            RestorePendingSelection();
+            _inner.SingleSelect = value;
+            CaptureVisibleSelection();
+        }
     }
 
     public int SelectedIndex
@@ -100,6 +116,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                 return;
             }
 
+            RestorePendingSelection();
             _inner.SelectedIndex = value;
             CaptureVisibleSelection();
         }
@@ -118,6 +135,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                 return;
             }
 
+            RestorePendingSelection();
             _inner.SelectedItem = value;
             CaptureVisibleSelection();
         }
@@ -142,6 +160,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     public void BeginBatchUpdate()
     {
         _inner.BeginBatchUpdate();
+        RestorePendingSelection();
     }
 
     public void EndBatchUpdate()
@@ -156,36 +175,43 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
     public void Select(int index)
     {
+        RestorePendingSelection();
         _inner.Select(index);
         CaptureVisibleSelection();
     }
 
     public void Deselect(int index)
     {
+        RestorePendingSelection();
         _inner.Deselect(index);
         CaptureVisibleSelection();
     }
 
     public void SelectRange(int start, int end)
     {
+        RestorePendingSelection();
         _inner.SelectRange(start, end);
         CaptureVisibleSelection();
     }
 
     public void DeselectRange(int start, int end)
     {
+        RestorePendingSelection();
         _inner.DeselectRange(start, end);
         CaptureVisibleSelection();
     }
 
     public void SelectAll()
     {
+        RestorePendingSelection();
         _inner.SelectAll();
         CaptureVisibleSelection();
     }
 
     public void Clear()
     {
+        _sourceChangeVersion++;
+        _pendingSelectionSnapshot = null;
         _inner.Clear();
         _selectionSnapshot.Clear();
         _selectionIdentities.Clear();
@@ -223,6 +249,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
         var snapshot = _selectionSnapshot.ToArray();
         var version = ++_sourceChangeVersion;
+        _pendingSelectionSnapshot = snapshot;
 
         _uiScheduler.Schedule(snapshot, TimeSpan.Zero, (_, selectedIdentities) =>
         {
@@ -231,6 +258,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
                 return Disposable.Empty;
             }
 
+            _pendingSelectionSnapshot = null;
             RestoreSelectionSnapshot(selectedIdentities);
             return Disposable.Empty;
         });
@@ -280,6 +308,19 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
     private void CaptureVisibleSelection()
         => UpdateSelectionSnapshot(_selectionSnapshot.ToArray());
+
+    private void RestorePendingSelection()
+    {
+        var snapshot = _pendingSelectionSnapshot;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        _pendingSelectionSnapshot = null;
+        _sourceChangeVersion++;
+        RestoreSelectionSnapshot(snapshot);
+    }
 
     private void ReconcileSelection()
     {
@@ -397,6 +438,11 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     {
         _selectionSnapshot.Clear();
         _selectionIdentities.Clear();
+
+        if (Source is null)
+        {
+            return;
+        }
 
         if (previousSnapshot is not null)
         {
