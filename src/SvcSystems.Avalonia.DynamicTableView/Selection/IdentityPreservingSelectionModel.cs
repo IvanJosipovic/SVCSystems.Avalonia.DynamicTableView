@@ -81,6 +81,8 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
     public void Dispose()
     {
+        _sourceChangeVersion++;
+        _pendingSelectionSnapshot = null;
         DetachSourceNotifications();
 
         _identitySource = null;
@@ -90,7 +92,17 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     public bool SingleSelect
     {
         get => _inner.SingleSelect;
-        set => _inner.SingleSelect = value;
+        set
+        {
+            if (_inner.SingleSelect == value)
+            {
+                return;
+            }
+
+            RestorePendingSelection();
+            _inner.SingleSelect = value;
+            CaptureVisibleSelection();
+        }
     }
 
     public int SelectedIndex
@@ -147,8 +159,8 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
 
     public void BeginBatchUpdate()
     {
-        RestorePendingSelection();
         _inner.BeginBatchUpdate();
+        RestorePendingSelection();
     }
 
     public void EndBatchUpdate()
@@ -426,6 +438,11 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : ISelectio
     {
         _selectionSnapshot.Clear();
         _selectionIdentities.Clear();
+
+        if (Source is null)
+        {
+            return;
+        }
 
         if (previousSnapshot is not null)
         {
