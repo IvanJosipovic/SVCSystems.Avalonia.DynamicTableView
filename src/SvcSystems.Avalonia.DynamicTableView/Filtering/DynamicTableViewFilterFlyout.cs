@@ -1,4 +1,5 @@
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 
 namespace SvcSystems.Avalonia.DynamicTableView;
 
@@ -13,6 +14,11 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
     private readonly bool _isDate;
     private Button? _applyButton;
     private Button? _clearButton;
+    private TextBox? _valueTextBox;
+    private TextBox? _secondValueTextBox;
+    private NumericUpDown? _numericValueBox;
+    private NumericUpDown? _numericSecondValueBox;
+    private ComboBox? _choiceBox;
     private ListBox? _multipleChoiceBox;
     private object?[] _selectedMultipleChoiceValues = [];
     private StringComparison _stringComparison = StringComparison.OrdinalIgnoreCase;
@@ -59,10 +65,22 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
     public partial string? SecondValueText { get; set; }
 
     [GeneratedDirectProperty]
+    public partial decimal? FirstNumericValue { get; set; }
+
+    [GeneratedDirectProperty]
+    public partial decimal? SecondNumericValue { get; set; }
+
+    [GeneratedDirectProperty]
     public partial bool IsValueInputVisible { get; set; }
 
     [GeneratedDirectProperty]
+    public partial bool IsNumericValueInputVisible { get; set; }
+
+    [GeneratedDirectProperty]
     public partial bool IsSecondValueInputVisible { get; set; }
+
+    [GeneratedDirectProperty]
+    public partial bool IsNumericSecondValueInputVisible { get; set; }
 
     [GeneratedDirectProperty]
     public partial bool IsSingleChoiceInputVisible { get; set; }
@@ -86,7 +104,14 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
         base.OnApplyTemplate(e);
         _applyButton = e.NameScope.Find<Button>("PART_ApplyButton");
         _clearButton = e.NameScope.Find<Button>("PART_ClearButton");
+        _valueTextBox = e.NameScope.Find<TextBox>("PART_ValueBox");
+        _secondValueTextBox = e.NameScope.Find<TextBox>("PART_SecondValueBox");
+        _numericValueBox = e.NameScope.Find<NumericUpDown>("PART_NumericValueBox");
+        _numericSecondValueBox = e.NameScope.Find<NumericUpDown>("PART_NumericSecondValueBox");
+        _choiceBox = e.NameScope.Find<ComboBox>("PART_ChoiceBox");
         _multipleChoiceBox = e.NameScope.Find<ListBox>("PART_MultipleChoiceBox");
+        ConfigureNumericInput(_numericValueBox);
+        ConfigureNumericInput(_numericSecondValueBox);
         if (_applyButton is not null)
             _applyButton.Click += ApplyButtonOnClick;
         if (_clearButton is not null)
@@ -97,7 +122,10 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
     }
 
     partial void OnSelectedOperatorChoicePropertyChanged(DynamicTableViewFilterChoice? newValue)
-        => UpdateInputVisibility();
+    {
+        ClearValidationErrors();
+        UpdateInputVisibility();
+    }
 
     private void UpdateInputVisibility()
     {
@@ -107,8 +135,10 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
         var isValueFree = filterOperator is DynamicTableViewFilterOperator.IsTrue or DynamicTableViewFilterOperator.IsFalse or DynamicTableViewFilterOperator.IsNull or DynamicTableViewFilterOperator.IsNotNull;
         IsSingleChoiceInputVisible = FilterChoices.Count > 0 && !isIn;
         IsMultiChoiceInputVisible = FilterChoices.Count > 0 && isIn;
-        IsValueInputVisible = !isValueFree && FilterChoices.Count == 0;
-        IsSecondValueInputVisible = isRange && (_isNumber || _isDate);
+        IsValueInputVisible = !isValueFree && FilterChoices.Count == 0 && (!_isNumber || isIn);
+        IsNumericValueInputVisible = !isValueFree && _isNumber && FilterChoices.Count == 0 && !isIn;
+        IsSecondValueInputVisible = isRange && _isDate;
+        IsNumericSecondValueInputVisible = isRange && _isNumber;
     }
 
     private void ApplyButtonOnClick(object? sender, RoutedEventArgs e)
@@ -116,6 +146,7 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
         if (SelectedOperatorChoice?.Value is not DynamicTableViewFilterOperator filterOperator)
             return;
 
+        ClearValidationErrors();
         object? value = null;
         object? secondValue = null;
         IReadOnlyList<object?>? values = null;
@@ -135,49 +166,64 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
                     .ToArray() ?? [];
                 if (values.Count == 0)
                 {
-                    FilterValidationFailed?.Invoke(this, EventArgs.Empty);
+                    ReportValidationError(_multipleChoiceBox, DynamicTableViewResources.FilterValidationRequired);
                     return;
                 }
             }
             else
             {
-                value = SelectedChoice?.Value;
+                if (SelectedChoice is null)
+                {
+                    ReportValidationError(_choiceBox, DynamicTableViewResources.FilterValidationRequired);
+                    return;
+                }
+                value = SelectedChoice.Value;
             }
         }
         else if (filterOperator == DynamicTableViewFilterOperator.In)
         {
             var tokens = (FirstValueText ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0)
+            {
+                ReportValidationError(_valueTextBox, DynamicTableViewResources.FilterValidationRequired);
+                return;
+            }
+
             var parsed = new object?[tokens.Length];
             for (var i = 0; i < tokens.Length; i++)
             {
                 if (!TryParseValue(tokens[i], out parsed[i]))
                 {
-                    FilterValidationFailed?.Invoke(this, EventArgs.Empty);
+                    ReportValidationError(GetFirstValueInput(), GetValueValidationMessage());
                     return;
                 }
             }
             values = parsed;
         }
-        else if (!TryParseValue(FirstValueText ?? string.Empty, out value))
+        else if (!TryParseValue(GetFirstValueText(), out value))
         {
-            FilterValidationFailed?.Invoke(this, EventArgs.Empty);
+            ReportValidationError(GetFirstValueInput(), GetValueValidationMessage());
             return;
         }
 
         if (filterOperator is DynamicTableViewFilterOperator.Between or DynamicTableViewFilterOperator.NotBetween)
         {
-            if (!TryParseValue(SecondValueText ?? string.Empty, out secondValue))
+            if (!TryParseValue(GetSecondValueText(), out secondValue))
             {
-                FilterValidationFailed?.Invoke(this, EventArgs.Empty);
+                ReportValidationError(GetSecondValueInput(), GetValueValidationMessage());
                 return;
             }
         }
 
+        ClearValidationErrors();
         _source.SetFilter(new(_column.Key, filterOperator, value, secondValue, values, _stringComparison));
     }
 
     private void ClearButtonOnClick(object? sender, RoutedEventArgs e)
-        => _source.SetFilter(null, _column.Key);
+    {
+        ClearValidationErrors();
+        _source.SetFilter(null, _column.Key);
+    }
 
     private void MultipleChoiceBoxOnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -217,8 +263,20 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
             return;
         }
 
-        FirstValueText = FormatFilterValue(descriptor.Value);
-        SecondValueText = FormatFilterValue(descriptor.SecondValue);
+        if (_isNumber)
+        {
+            FirstNumericValue = TryParseNumericValue(FormatFilterValue(descriptor.Value), out decimal firstValue)
+                ? firstValue
+                : null;
+            SecondNumericValue = TryParseNumericValue(FormatFilterValue(descriptor.SecondValue), out decimal secondValue)
+                ? secondValue
+                : null;
+        }
+        else
+        {
+            FirstValueText = FormatFilterValue(descriptor.Value);
+            SecondValueText = FormatFilterValue(descriptor.SecondValue);
+        }
     }
 
     private void RestoreMultipleChoiceSelection()
@@ -248,7 +306,7 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
     {
         if (_isNumber)
         {
-            var parsed = decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var number);
+            var parsed = TryParseNumericValue(text, out var number);
             value = number;
             return parsed;
         }
@@ -259,7 +317,72 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
             return parsed;
         }
         value = text;
-        return true;
+        return !string.IsNullOrWhiteSpace(text);
+    }
+
+    private static bool TryParseNumericValue(string? text, out decimal value)
+        => decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
+
+    private string GetFirstValueText()
+        => _isNumber && SelectedOperatorChoice?.Value is not DynamicTableViewFilterOperator.In
+            ? _numericValueBox?.Text ?? string.Empty
+            : FirstValueText ?? string.Empty;
+
+    private string GetSecondValueText()
+        => _isNumber ? _numericSecondValueBox?.Text ?? string.Empty : SecondValueText ?? string.Empty;
+
+    private Control? GetFirstValueInput()
+        => _isNumber && SelectedOperatorChoice?.Value is not DynamicTableViewFilterOperator.In
+            ? GetNumericInputValidationTarget(_numericValueBox)
+            : _valueTextBox;
+
+    private Control? GetSecondValueInput()
+        => _isNumber ? GetNumericInputValidationTarget(_numericSecondValueBox) : _secondValueTextBox;
+
+    private string GetValueValidationMessage()
+        => _isNumber
+            ? DynamicTableViewResources.FilterValidationNumber
+            : _isDate
+                ? DynamicTableViewResources.FilterValidationDate
+                : DynamicTableViewResources.FilterValidationRequired;
+
+    private static void ConfigureNumericInput(NumericUpDown? input)
+    {
+        if (input is null)
+            return;
+
+        input.NumberFormat = CultureInfo.InvariantCulture.NumberFormat;
+        input.ParsingNumberStyle = NumberStyles.Number;
+        input.ShowButtonSpinner = true;
+    }
+
+    private void ClearValidationErrors()
+    {
+        ClearValidationError(_valueTextBox);
+        ClearValidationError(_secondValueTextBox);
+        ClearValidationError(GetNumericInputValidationTarget(_numericValueBox));
+        ClearValidationError(GetNumericInputValidationTarget(_numericSecondValueBox));
+        ClearValidationError(_choiceBox);
+        ClearValidationError(_multipleChoiceBox);
+    }
+
+    private static Control? GetNumericInputValidationTarget(NumericUpDown? input)
+    {
+        Control? textBox = input?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+        return textBox ?? input;
+    }
+
+    private static void ClearValidationError(Control? control)
+    {
+        if (control is not null)
+            DataValidationErrors.ClearErrors(control);
+    }
+
+    private void ReportValidationError(Control? control, string message)
+    {
+        if (control is not null)
+            DataValidationErrors.SetErrors(control, [message]);
+        FilterValidationFailed?.Invoke(this, EventArgs.Empty);
     }
 
     private static IReadOnlyList<DynamicTableViewFilterChoice> GetChoices(DynamicTableViewColumn column, bool isBoolean)

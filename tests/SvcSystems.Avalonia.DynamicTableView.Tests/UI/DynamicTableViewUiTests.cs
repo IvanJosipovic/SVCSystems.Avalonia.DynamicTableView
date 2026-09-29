@@ -1540,6 +1540,184 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Empty_text_filter_is_rejected_and_reports_validation()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 0);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+
+            var content = Assert.IsAssignableFrom<Control>(flyout.Content);
+            var textInput = Assert.Single(content.GetVisualDescendants().OfType<TextBox>()
+                .Where(static textBox => textBox.Name == "PART_ValueBox"));
+            var applyButton = content.GetVisualDescendants().OfType<Button>()
+                .Single(static button => button.Name == "PART_ApplyButton");
+
+            applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(source.FilterDescriptors);
+            Assert.True(DataValidationErrors.GetHasErrors(textInput));
+            Assert.Contains(
+                DynamicTableViewResources.FilterValidationRequired,
+                DataValidationErrors.GetErrors(textInput)!.Select(static error => error.ToString()));
+
+            textInput.Text = "   ";
+            applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.FilterDescriptors);
+            Assert.True(DataValidationErrors.GetHasErrors(textInput));
+
+            textInput.Text = "ph";
+            applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(DataValidationErrors.GetHasErrors(textInput));
+            Assert.Equal("ph", Assert.Single(source.FilterDescriptors).Value);
+            flyout.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Invalid_numeric_filter_shows_validation_error_and_does_not_apply()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 1);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+
+            var content = Assert.IsAssignableFrom<Control>(flyout.Content);
+            var numericInput = Assert.Single(content.GetVisualDescendants().OfType<NumericUpDown>()
+                .Where(static input => input.Name == "PART_NumericValueBox"));
+            Assert.True(numericInput.IsVisible);
+            Assert.True(numericInput.ShowButtonSpinner);
+            Assert.DoesNotContain(content.GetVisualDescendants().OfType<TextBox>(),
+                static input => input.Name == "PART_ValueBox" && input.IsVisible);
+            var numericEditor = Assert.Single(numericInput.GetVisualDescendants().OfType<TextBox>());
+            numericInput.Text = "not a number";
+
+            content.GetVisualDescendants().OfType<Button>()
+                .Single(static button => button.Name == "PART_ApplyButton")
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(source.FilterDescriptors);
+            Assert.True(DataValidationErrors.GetHasErrors(numericEditor));
+            Assert.Contains(
+                DynamicTableViewResources.FilterValidationNumber,
+                DataValidationErrors.GetErrors(numericEditor)!.Select(static error => error.ToString()));
+
+            numericInput.Text = "20";
+            content.GetVisualDescendants().OfType<Button>()
+                .Single(static button => button.Name == "PART_ApplyButton")
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(DataValidationErrors.GetHasErrors(numericEditor));
+            Assert.Equal(20m, Assert.Single(source.FilterDescriptors).Value);
+            flyout.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Numeric_between_filter_validates_each_numeric_input()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var header = GetHeaderControl(table, 1);
+            var filterButton = Assert.Single(header.GetVisualDescendants().OfType<Button>()
+                .Where(static button => button.Classes.Contains("dynamic-table-view-filter-button")));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filterButton));
+            FlyoutBase.ShowAttachedFlyout(filterButton);
+            Dispatcher.UIThread.RunJobs();
+
+            var content = Assert.IsAssignableFrom<Control>(flyout.Content);
+            var operatorBox = Assert.Single(content.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_OperatorBox"));
+            operatorBox.SelectedIndex = 6;
+            Dispatcher.UIThread.RunJobs();
+
+            var firstInput = Assert.Single(content.GetVisualDescendants().OfType<NumericUpDown>()
+                .Where(static input => input.Name == "PART_NumericValueBox"));
+            var secondInput = Assert.Single(content.GetVisualDescendants().OfType<NumericUpDown>()
+                .Where(static input => input.Name == "PART_NumericSecondValueBox"));
+            Assert.True(firstInput.IsVisible);
+            Assert.True(secondInput.IsVisible);
+            Assert.True(firstInput.ShowButtonSpinner);
+            Assert.True(secondInput.ShowButtonSpinner);
+            firstInput.Text = "15";
+            secondInput.Text = "25";
+
+            var applyButton = content.GetVisualDescendants().OfType<Button>()
+                .Single(static button => button.Name == "PART_ApplyButton");
+            applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            DynamicTableViewFilterDescriptor appliedFilter = Assert.Single(source.FilterDescriptors);
+            Assert.Equal(DynamicTableViewFilterOperator.Between, appliedFilter.Operator);
+            Assert.Equal(15m, appliedFilter.Value);
+            Assert.Equal(25m, appliedFilter.SecondValue);
+            Assert.Equal(["b"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+
+            secondInput.Text = "invalid";
+            applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            TextBox secondInputEditor = Assert.Single(secondInput.GetVisualDescendants().OfType<TextBox>());
+            Assert.True(DataValidationErrors.GetHasErrors(secondInputEditor));
+            Assert.Same(appliedFilter, Assert.Single(source.FilterDescriptors));
+            flyout.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Filter_button_background_stays_transparent_while_icon_highlights_on_hover()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1781,10 +1959,20 @@ public sealed class DynamicTableViewUiTests
         var content = Assert.IsAssignableFrom<Control>(flyout.Content);
         var comboBoxes = content.GetVisualDescendants().OfType<ComboBox>().ToArray();
         comboBoxes[0].SelectedIndex = operatorIndex;
-        var valueBox = content.GetVisualDescendants().OfType<TextBox>()
-            .Single(static textBox => textBox.Name == "PART_ValueBox");
-        valueBox.Text = firstValue;
-        Assert.Equal(firstValue, valueBox.Text);
+        NumericUpDown? numericValueBox = content.GetVisualDescendants().OfType<NumericUpDown>()
+            .SingleOrDefault(static input => input.Name == "PART_NumericValueBox" && input.IsVisible);
+        if (numericValueBox is not null)
+        {
+            numericValueBox.Text = firstValue;
+            Assert.Equal(firstValue, numericValueBox.Text);
+        }
+        else
+        {
+            TextBox valueBox = content.GetVisualDescendants().OfType<TextBox>()
+                .Single(static textBox => textBox.Name == "PART_ValueBox");
+            valueBox.Text = firstValue;
+            Assert.Equal(firstValue, valueBox.Text);
+        }
         content.GetVisualDescendants().OfType<Button>()
             .Single(static button => button.Name == "PART_ApplyButton")
             .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -1803,8 +1991,17 @@ public sealed class DynamicTableViewUiTests
 
         var content = Assert.IsAssignableFrom<Control>(flyout.Content);
         Assert.Equal(operatorIndex, content.GetVisualDescendants().OfType<ComboBox>().First().SelectedIndex);
-        Assert.Equal(firstValue, content.GetVisualDescendants().OfType<TextBox>()
-            .Single(static textBox => textBox.Name == "PART_ValueBox").Text);
+        NumericUpDown? numericValueBox = content.GetVisualDescendants().OfType<NumericUpDown>()
+            .SingleOrDefault(static input => input.Name == "PART_NumericValueBox" && input.IsVisible);
+        if (numericValueBox is not null)
+        {
+            Assert.Equal(firstValue, numericValueBox.Text);
+        }
+        else
+        {
+            Assert.Equal(firstValue, content.GetVisualDescendants().OfType<TextBox>()
+                .Single(static textBox => textBox.Name == "PART_ValueBox").Text);
+        }
         flyout.Hide();
     }
 }
