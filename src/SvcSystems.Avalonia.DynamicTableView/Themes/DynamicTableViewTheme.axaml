@@ -194,11 +194,12 @@
   </Style>
 
   <Style Selector="TableView.dynamic-table-view TableViewColumnHeader /template/ Thumb#PART_Resizer">
-    <Setter Property="Margin" Value="0,0,-6,0" />
+    <Setter Property="Width" Value="7" />
+    <Setter Property="Margin" Value="0" />
   </Style>
 
   <Style Selector="TableView.dynamic-table-view TableViewColumnHeader /template/ Thumb#PART_Resizer /template/ Rectangle">
-    <Setter Property="IsVisible" Value="False" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
   </Style>
 
   <Style Selector="TableView.dynamic-table-view TableViewColumnHeader:pointerover:not(.filter-button-pointerover) /template/ ContentPresenter#PART_ContentPresenter">
