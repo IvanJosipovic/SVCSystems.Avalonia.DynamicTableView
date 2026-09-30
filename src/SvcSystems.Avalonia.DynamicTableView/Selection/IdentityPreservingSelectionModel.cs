@@ -24,6 +24,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
     private IEnumerable? _identitySource;
     private TIdentity[]? _pendingSelectionSnapshot;
     private bool _restoreCaptureScheduled;
+    private bool _settingSource;
     private int _sourceChangeVersion;
 
     public IdentityPreservingSelectionModel(
@@ -58,8 +59,18 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
             Interlocked.Increment(ref _sourceChangeVersion);
             _pendingSelectionSnapshot = null;
             DetachSourceNotifications();
-            _inner.Source = value;
-            AttachSourceNotifications(value as INotifyCollectionChanged);
+            _settingSource = true;
+            try
+            {
+                AttachSourceNotifications(value as INotifyCollectionChanged);
+                _inner.Source = value;
+                CompleteSourceNotificationAttachment();
+            }
+            finally
+            {
+                _settingSource = false;
+            }
+
             ReconcileSelection();
         }
     }
@@ -227,12 +238,25 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
 
     private void InnerSelectionChanged(object? sender, SelectionModelSelectionChangedEventArgs e)
     {
+        if (!_settingSource && _pendingSelectionSnapshot is null)
+        {
+            UpdateSelectionSnapshot();
+        }
+
         SelectionChanged?.Invoke(this, e);
     }
 
     private void AttachSourceNotifications(INotifyCollectionChanged? source)
     {
         _sourceNotifications = source;
+        if (_sourceNotifications is not null)
+        {
+            _sourceNotifications.CollectionChanged += SourceOnCollectionChanging;
+        }
+    }
+
+    private void CompleteSourceNotificationAttachment()
+    {
         if (_sourceNotifications is not null)
         {
             _sourceNotifications.CollectionChanged += SourceOnCollectionChanged;
@@ -243,12 +267,13 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
     {
         if (_sourceNotifications is not null)
         {
+            _sourceNotifications.CollectionChanged -= SourceOnCollectionChanging;
             _sourceNotifications.CollectionChanged -= SourceOnCollectionChanged;
             _sourceNotifications = null;
         }
     }
 
-    private void SourceOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    private void SourceOnCollectionChanging(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (_selectionSnapshot.Count == 0 && _pendingSelectionSnapshot is null)
         {
@@ -257,6 +282,10 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
 
         Interlocked.Increment(ref _sourceChangeVersion);
         _pendingSelectionSnapshot ??= _selectionSnapshot.ToArray();
+    }
+
+    private void SourceOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
         ScheduleRestoreCapture();
     }
 

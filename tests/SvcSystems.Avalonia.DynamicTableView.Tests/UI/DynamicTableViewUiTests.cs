@@ -13,6 +13,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
 using DynamicData;
 using SvcSystems.Avalonia.DynamicTableView.Tests.Fixtures;
 
@@ -1299,6 +1300,70 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Plain_click_before_live_reorder_does_not_restore_previous_multi_selection()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler uiScheduler = new();
+        using var source = DynamicTableViewTestData.CreateSource(
+            cache, workerScheduler: ImmediateScheduler.Instance, uiScheduler: uiScheduler);
+        var rows = Enumerable.Range(0, 6)
+            .Select(index => new DynamicTableViewTestRow(
+                $"row-{index:D2}", $"Item {index:D2}", index, DateTimeOffset.UnixEpoch, true, DynamicTableViewTestState.Ready))
+            .ToArray();
+        cache.AddOrUpdate(rows);
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().Count() == rows.Length);
+        source.SetSort([new("age", ListSortDirection.Ascending)]);
+        uiScheduler.RunUntilIdle();
+
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 700, Height = 420, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var first = GetRowCenter(window, table, "row-00");
+            var fifth = GetRowCenter(window, table, "row-04");
+            window.MouseDown(first, MouseButton.Left);
+            window.MouseMove(fifth, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(fifth, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(5, source.SelectionModel.SelectedItems.Count);
+
+            var newlyClickedRow = GetRowCenter(window, table, "row-05");
+            window.MouseDown(newlyClickedRow, MouseButton.Left);
+            window.MouseUp(newlyClickedRow, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            string[] expectedIds = ["row-05"];
+            Assert.Equal(expectedIds, source.SelectionModel.SelectedItems
+                .Cast<DynamicTableViewTestRow>()
+                .Select(static row => row.Id)
+                .Order(StringComparer.Ordinal));
+
+            cache.Edit(updater =>
+            {
+                for (var index = 0; index < 5; index++)
+                    updater.AddOrUpdate(rows[index] with { Age = rows[index].Age + 20 });
+            });
+            uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().First().Id == "row-05");
+            Dispatcher.UIThread.RunJobs();
+
+            uiScheduler.RunUntilIdle();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(expectedIds, source.SelectionModel.SelectedItems
+                .Cast<DynamicTableViewTestRow>()
+                .Select(static row => row.Id)
+                .Order(StringComparer.Ordinal));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Header_click_cycles_ascending_descending_and_unsorted()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -2141,5 +2206,56 @@ public sealed class DynamicTableViewUiTests
                 .Single(static textBox => textBox.Name == "PART_ValueBox").Text);
         }
         flyout.Hide();
+    }
+
+    private sealed class ManualScheduler : IScheduler
+    {
+        private readonly Queue<Action> _actions = new();
+
+        public DateTimeOffset Now => DateTimeOffset.UtcNow;
+
+        public IDisposable Schedule<TState>(TState state, Func<IScheduler, TState, IDisposable> action)
+            => Enqueue(() => action(this, state));
+
+        public IDisposable Schedule<TState>(TState state, TimeSpan dueTime,
+            Func<IScheduler, TState, IDisposable> action)
+            => Enqueue(() => action(this, state));
+
+        public IDisposable Schedule<TState>(TState state, DateTimeOffset dueTime,
+            Func<IScheduler, TState, IDisposable> action)
+            => Enqueue(() => action(this, state));
+
+        public void RunUntil(Func<bool> condition)
+        {
+            var steps = 0;
+            while (!condition())
+            {
+                Assert.True(_actions.Count > 0, "Scheduler queue emptied before expected source state arrived.");
+                RunNext();
+                Assert.True(++steps < 1000, "Scheduler exceeded expected work limit.");
+            }
+        }
+
+        public void RunUntilIdle()
+        {
+            var steps = 0;
+            while (_actions.Count > 0)
+            {
+                RunNext();
+                Assert.True(++steps < 1000, "Scheduler exceeded expected work limit.");
+            }
+        }
+
+        private IDisposable Enqueue(Action action)
+        {
+            _actions.Enqueue(action);
+            return Disposable.Empty;
+        }
+
+        private void RunNext()
+        {
+            Action action = _actions.Dequeue();
+            action();
+        }
     }
 }
