@@ -15,6 +15,21 @@ public sealed partial class DynamicTableView : TableView
     [GeneratedStyledProperty(DynamicTableViewGridLinesVisibility.None)]
     public partial DynamicTableViewGridLinesVisibility GridLinesVisibility { get; set; }
 
+    /// <summary>Gets or sets how text wraps in cells using the default text template. Defaults to <see cref="TextWrapping.NoWrap"/>.</summary>
+    [GeneratedStyledProperty(TextWrapping.NoWrap)]
+    public partial TextWrapping CellTextWrapping { get; set; }
+
+    /// <summary>Gets or sets how text is trimmed in cells using the default text template. Defaults to no trimming.</summary>
+    [GeneratedStyledProperty]
+    public partial TextTrimming? CellTextTrimming { get; set; }
+
+    /// <summary>Gets or sets the maximum lines shown in cells using the default text template. Defaults to one line; zero means unlimited.</summary>
+    [GeneratedStyledProperty(1, Validate = nameof(ValidateCellMaxLines))]
+    public partial int CellMaxLines { get; set; }
+
+    private static bool ValidateCellMaxLines(int value)
+        => value >= 0;
+
     /// <summary>Gets or sets whether clicking headers can add secondary sort columns. Defaults to false.</summary>
     [GeneratedDirectProperty]
     public partial bool AllowMultipleSorts { get; set; }
@@ -148,6 +163,10 @@ public sealed partial class DynamicTableView : TableView
             AttachSource(change.GetNewValue<IDynamicTableViewSource?>());
         else if (change.Property == GridLinesVisibilityProperty)
             UpdateGridLinesClass();
+        else if (change.Property == CellTextWrappingProperty ||
+                 change.Property == CellTextTrimmingProperty ||
+                 change.Property == CellMaxLinesProperty)
+            UpdateDefaultCellTextOptions();
         else if (change.Property == IsVisibleProperty && change.GetNewValue<bool>())
             QueueHeaderRefresh();
     }
@@ -210,6 +229,12 @@ public sealed partial class DynamicTableView : TableView
 
         if (className is not null)
             Classes.Add(className);
+    }
+
+    private void UpdateDefaultCellTextOptions()
+    {
+        foreach (var cell in this.GetVisualDescendants().OfType<DynamicTableViewCell>())
+            cell.UpdateDefaultTextOptions();
     }
 
     private void SourceOnChanged(object? sender, EventArgs e)
@@ -286,7 +311,7 @@ public sealed partial class DynamicTableView : TableView
             HeaderTemplate = CreateHeaderTemplate(),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Width = GetInitialWidth(definition),
-            CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(definition), supportsRecycling: true)
+            CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(this, definition), supportsRecycling: true)
         };
 
     private IDataTemplate CreateHeaderTemplate()
