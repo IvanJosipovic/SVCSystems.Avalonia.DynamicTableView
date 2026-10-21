@@ -54,6 +54,9 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     [GeneratedDirectProperty]
     public partial bool IsFiltered { get; set; }
 
+    [GeneratedDirectProperty]
+    public partial bool IsResizeEnabled { get; set; }
+
     protected override Type StyleKeyOverride => typeof(DynamicTableViewHeader);
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
@@ -69,8 +72,12 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
         }
     }
 
-    public void UpdateState(IReadOnlyList<DynamicTableViewSortDescriptor> sorts, IReadOnlyList<DynamicTableViewFilterDescriptor> filters)
+    public void UpdateState(
+        IReadOnlyList<DynamicTableViewSortDescriptor> sorts,
+        IReadOnlyList<DynamicTableViewFilterDescriptor> filters,
+        bool isResizeEnabled)
     {
+        IsResizeEnabled = isResizeEnabled;
         var sortIndex = -1;
         DynamicTableViewSortDescriptor? descriptor = null;
         for (var i = 0; i < sorts.Count; i++)
@@ -99,7 +106,8 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     {
         _sortPointerDown = IsSortEnabled &&
             e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed &&
-            !IsWithinNamedControl(e.Source, "PART_FilterButton");
+            !IsWithinNamedControl(e.Source, "PART_FilterButton") &&
+            !IsWithinClass(e.Source, "dynamic-table-view-column-resize-grip");
         if (_sortPointerDown)
             _sortPointerDownPosition = e.GetPosition(this);
     }
@@ -128,4 +136,8 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
 
     private static bool IsWithinNamedControl(object? source, string name)
         => source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Control>().Any(control => control.Name == name);
+
+    private static bool IsWithinClass(object? source, string className)
+        => source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Control>()
+            .Any(control => control.Classes.Contains(className));
 }
