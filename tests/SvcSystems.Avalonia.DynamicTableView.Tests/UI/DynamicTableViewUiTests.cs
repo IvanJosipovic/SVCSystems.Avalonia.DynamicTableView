@@ -22,6 +22,73 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class DynamicTableViewUiTests
 {
     [AvaloniaFact]
+    public void Default_cell_text_options_inherit_and_update_with_column_overrides()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow>[] columns =
+        [
+            DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name),
+            DynamicTableViewColumn<DynamicTableViewTestRow>.Create("age", "Age", static row => row.Age)
+        ];
+        columns[1].CellTextWrapping = TextWrapping.Wrap;
+        columns[1].CellTextTrimming = TextTrimming.CharacterEllipsis;
+        columns[1].CellMaxLines = 2;
+        using var source = DynamicTableViewTestData.CreateSource(cache, columns);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+
+        DynamicTableView table = new()
+        {
+            Source = source,
+            CellTextWrapping = TextWrapping.NoWrap,
+            CellTextTrimming = TextTrimming.WordEllipsis,
+            CellMaxLines = 3
+        };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            TextBlock nameText = table.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "Alpha");
+            TextBlock ageText = table.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "10");
+            Assert.Equal(TextWrapping.NoWrap, nameText.TextWrapping);
+            Assert.Equal(TextTrimming.WordEllipsis, nameText.TextTrimming);
+            Assert.Equal(3, nameText.MaxLines);
+            Assert.Equal(TextWrapping.Wrap, ageText.TextWrapping);
+            Assert.Equal(TextTrimming.CharacterEllipsis, ageText.TextTrimming);
+            Assert.Equal(2, ageText.MaxLines);
+
+            table.CellTextWrapping = TextWrapping.Wrap;
+            table.CellTextTrimming = TextTrimming.CharacterEllipsis;
+            table.CellMaxLines = 4;
+            Assert.Equal(TextWrapping.Wrap, nameText.TextWrapping);
+            Assert.Equal(TextTrimming.CharacterEllipsis, nameText.TextTrimming);
+            Assert.Equal(4, nameText.MaxLines);
+
+            columns[0].CellTextWrapping = TextWrapping.NoWrap;
+            columns[0].CellMaxLines = 0;
+            Assert.Equal(TextWrapping.NoWrap, nameText.TextWrapping);
+            Assert.Equal(0, nameText.MaxLines);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Cell_max_lines_rejects_negative_values()
+    {
+        DynamicTableView table = new();
+        Assert.Throws<ArgumentException>(() => table.CellMaxLines = -1);
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> column =
+            DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.CellMaxLines = -1);
+    }
+
+    [AvaloniaFact]
     public void Source_columns_and_selection_are_attached_to_the_control()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

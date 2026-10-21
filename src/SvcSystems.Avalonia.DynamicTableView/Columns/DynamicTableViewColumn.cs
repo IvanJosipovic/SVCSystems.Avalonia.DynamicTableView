@@ -3,6 +3,10 @@ namespace SvcSystems.Avalonia.DynamicTableView;
 /// <summary>Base metadata for one dynamic table column.</summary>
 public abstract class DynamicTableViewColumn
 {
+    private TextWrapping? _cellTextWrapping;
+    private TextTrimming? _cellTextTrimming;
+    private int? _cellMaxLines;
+
     /// <summary>Creates column metadata.</summary>
     protected DynamicTableViewColumn(string key, object header, Type valueType, IDataTemplate? cellTemplate)
     {
@@ -26,6 +30,49 @@ public abstract class DynamicTableViewColumn
 
     /// <summary>Gets or sets the cell template.</summary>
     public IDataTemplate? CellTemplate { get; set; }
+
+    /// <summary>Gets or sets the default text wrapping override for this column. Null inherits from the table.</summary>
+    public TextWrapping? CellTextWrapping
+    {
+        get => _cellTextWrapping;
+        set
+        {
+            if (_cellTextWrapping == value)
+                return;
+            _cellTextWrapping = value;
+            CellTextOptionsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>Gets or sets the default text trimming override for this column. Null inherits from the table.</summary>
+    public TextTrimming? CellTextTrimming
+    {
+        get => _cellTextTrimming;
+        set
+        {
+            if (Equals(_cellTextTrimming, value))
+                return;
+            _cellTextTrimming = value;
+            CellTextOptionsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>Gets or sets the default maximum lines override for this column. Null inherits from the table; zero means unlimited.</summary>
+    public int? CellMaxLines
+    {
+        get => _cellMaxLines;
+        set
+        {
+            if (value is < 0)
+                throw new ArgumentOutOfRangeException(nameof(value), "The maximum line count cannot be negative.");
+            if (_cellMaxLines == value)
+                return;
+            _cellMaxLines = value;
+            CellTextOptionsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    internal event EventHandler? CellTextOptionsChanged;
 
     /// <summary>Gets or sets width behavior.</summary>
     public DynamicTableViewWidthMode WidthMode { get; set; } = DynamicTableViewWidthMode.Auto;
