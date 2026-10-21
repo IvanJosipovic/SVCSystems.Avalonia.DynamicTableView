@@ -458,9 +458,16 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal(0, columnHeader.Bounds.X);
             Assert.True(headerStrip.Bounds.Height > 0);
             Assert.Equal(columnHeader.Bounds, hoverSurface.Bounds);
-            var resizer = Assert.Single(columnHeader.GetVisualDescendants().OfType<Thumb>());
-            Assert.Equal(new Thickness(0), resizer.Margin);
-            Assert.Equal(7, resizer.Bounds.Width);
+            var resizer = Assert.Single(columnHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            Assert.True(resizer.IsVisible);
+            var lastColumnHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>().Single(candidate =>
+                ReferenceEquals(candidate.Column, table.Columns[^1]));
+            var lastColumnGrip = Assert.Single(lastColumnHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            Assert.False(lastColumnGrip.IsVisible);
+            Assert.Equal(new Thickness(0, 0, -6, 0), resizer.Margin);
+            Assert.Equal(12, resizer.Bounds.Width);
             Assert.Equal(0, resizer.Bounds.Y);
             Assert.Equal(columnHeader.Bounds.Height, resizer.Bounds.Height);
             Assert.Equal(headerStrip.Bounds.Height, columnHeader.Bounds.Height);
@@ -964,21 +971,33 @@ public sealed class DynamicTableViewUiTests
         {
             window.Show();
             Dispatcher.UIThread.RunJobs();
-            var header = table.GetVisualDescendants().OfType<TableViewColumnHeader>().First();
-            var resizer = Assert.Single(header.GetVisualDescendants().OfType<Thumb>());
-            var gripLine = Assert.Single(resizer.GetVisualDescendants().OfType<Rectangle>());
-            Assert.True(gripLine.IsVisible);
-            var linePosition = gripLine.TranslatePoint(new Point(gripLine.Bounds.Width / 2, gripLine.Bounds.Height / 2), header)
-                ?? throw new InvalidOperationException("Resize line has no header position.");
-            Assert.InRange(linePosition.X, header.Bounds.Width - 1, header.Bounds.Width);
-            var point = header.TranslatePoint(linePosition, window)
-                ?? throw new InvalidOperationException("Resize line has no window position.");
+            var header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[1]));
+            var leftHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizer = Assert.Single(leftHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            Assert.True(resizer.IsVisible);
+            Assert.Equal(12, resizer.Bounds.Width);
+            var gripCenter = resizer.TranslatePoint(new Point(resizer.Bounds.Width / 2, resizer.Bounds.Height / 2), leftHeader)
+                ?? throw new InvalidOperationException("Resize grip has no header position.");
+            Assert.InRange(gripCenter.X, leftHeader.Bounds.Width - 1, leftHeader.Bounds.Width + 1);
+            Assert.Equal(0, resizer.Bounds.Y);
+            Assert.InRange(resizer.Bounds.Height, leftHeader.Bounds.Height - 1, leftHeader.Bounds.Height);
+            var dividerCenter = header.TranslatePoint(new Point(0, header.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Divider has no window position.");
+            Point leftPoint = new(dividerCenter.X - 6, dividerCenter.Y);
+            window.MouseMove(leftPoint);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(leftHeader.Classes.Contains("dynamic-table-view-resize-pointerover"));
+            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), leftHeader.Cursor?.ToString());
 
-            window.MouseMove(point);
+            Point rightPoint = new(dividerCenter.X + 6, dividerCenter.Y);
+            window.MouseMove(rightPoint);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.True(resizer.IsPointerOver);
-            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), resizer.Cursor?.ToString());
+            Assert.True(header.Classes.Contains("dynamic-table-view-resize-pointerover"));
+            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), header.Cursor?.ToString());
         }
         finally
         {
@@ -1008,8 +1027,10 @@ public sealed class DynamicTableViewUiTests
             Dispatcher.UIThread.RunJobs();
             var header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
                 .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
-            var resizeStart = header.TranslatePoint(
-                new Point(header.Bounds.Width - 2, header.Bounds.Height / 2), window)
+            var resizeGrip = Assert.Single(header.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            var resizeStart = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2 + 2, resizeGrip.Bounds.Height / 2), window)
                 ?? throw new InvalidOperationException("Header has no window position.");
             Point resizeEnd = new(resizeStart.X + 3, resizeStart.Y);
 
@@ -1017,27 +1038,96 @@ public sealed class DynamicTableViewUiTests
             window.MouseDown(resizeStart, MouseButton.Left);
             window.MouseUp(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
-            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
-            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
 
             window.MouseDown(resizeStart, MouseButton.Left);
             window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
             window.MouseUp(resizeEnd, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
             DynamicTableViewState state = table.CaptureState();
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[0].WidthMode);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[1].WidthMode);
 
             window.Width = 960;
             Dispatcher.UIThread.RunJobs();
             table.RestoreState(state);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
-            Assert.Equal(state.Columns[0].Width, table.Columns[0].Width.Value);
-            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
+            Assert.Equal(state.Columns[1].Width, table.Columns[1].Width.Value);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_between_memory_and_created_changes_created_column_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> memory = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "memory", "Memory", static row => row.Age);
+        memory.WidthMode = DynamicTableViewWidthMode.Pixel;
+        memory.Width = 150;
+        DynamicTableViewColumn<DynamicTableViewTestRow> created = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "created", "Created", static row => row.CreatedAt);
+        created.WidthMode = DynamicTableViewWidthMode.Pixel;
+        created.Width = 180;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [memory, created]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var memoryHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeGrip = Assert.Single(memoryHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Memory header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y);
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y);
+            double initialMemoryWidth = table.Columns[0].ActualWidth;
+            double initialCreatedWidth = table.Columns[1].ActualWidth;
+            Point resizeMidpoint = new(resizeStart.X + 10, resizeStart.Y);
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), table.Cursor?.ToString());
+            window.MouseMove(resizeMidpoint, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), table.Cursor?.ToString());
+            Assert.Equal(initialMemoryWidth, table.Columns[0].ActualWidth);
+            Assert.True(table.Columns[1].ActualWidth < initialCreatedWidth,
+                "Dragging from the left side of the Memory/Created divider should resize Created.");
+
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(table.Classes.Contains("dynamic-table-view-column-resizing"));
+
+            Assert.Equal(initialMemoryWidth, table.Columns[0].ActualWidth);
+            Assert.True(table.Columns[1].ActualWidth < initialCreatedWidth);
+
+            double createdWidthAfterLeftSideDrag = table.Columns[1].ActualWidth;
+            Point rightSideStart = new(dividerCenter.X + 6, dividerCenter.Y);
+            Point rightSideMove = new(rightSideStart.X + 10, rightSideStart.Y);
+            window.MouseDown(rightSideStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), table.Cursor?.ToString());
+            window.MouseMove(rightSideMove, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(rightSideMove, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(table.Columns[1].ActualWidth < createdWidthAfterLeftSideDrag,
+                "Dragging from the right side of the Memory/Created divider should also resize Created.");
         }
         finally
         {
