@@ -70,6 +70,9 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
             FlyoutBase.SetAttachedFlyout(_filterButton, _owner.MakeFilterFlyout(Column));
             _filterButton.Click += FilterButtonOnClick;
         }
+        // The resize grip lives in this template. Let the table know it is now realized so it
+        // can rebuild its cached resize targets.
+        _owner.NotifyHeaderTemplateApplied();
     }
 
     public void UpdateState(
