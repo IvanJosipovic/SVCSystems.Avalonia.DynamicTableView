@@ -57,6 +57,7 @@ public sealed partial class DynamicTableView : TableView
     private TableViewColumnHeader? _resizeHoverHeader;
     private readonly List<(TableViewColumnHeader Header, Thumb Grip)> _resizeHeaders = [];
     private bool _resizeHeadersDirty = true;
+    private bool _resizeHeadersStale;
     private bool _headerDragStarted;
     private int _selectionDragAnchor = -1;
     private int _selectionDragLast = -1;
@@ -314,6 +315,10 @@ public sealed partial class DynamicTableView : TableView
     {
         _nativeColumns.Clear();
         Columns.Clear();
+        // Rebuilding the native columns makes Avalonia recreate the column header visuals,
+        // so the cached resize grips point at detached headers until the new ones are realized.
+        _resizeHeadersDirty = true;
+        _resizeHeaders.Clear();
         if (Source is null)
             return;
 
@@ -402,6 +407,10 @@ public sealed partial class DynamicTableView : TableView
                 CanUserResizeColumns && columnIndex >= 0 && columnIndex + 1 < Source.Columns.Count);
         }
     }
+
+    /// <summary>Invalidates the cached resize targets when a header template is realized.</summary>
+    internal void NotifyHeaderTemplateApplied()
+        => _resizeHeadersDirty = true;
 
     internal void ResizeColumnAtDivider(string headerKey, double deltaX)
     {
@@ -717,6 +726,27 @@ public sealed partial class DynamicTableView : TableView
         if (_resizeHeadersDirty)
             RefreshResizeHeaders();
 
+        if (TryHitTestDivider(position, out columnKey, out isRightHalf))
+            return true;
+
+        // The cached headers can go stale when Avalonia recreates the column header visuals,
+        // for example after the native columns are rebuilt. Refresh once and retry so the
+        // resize gesture keeps working against the live headers.
+        if (_resizeHeadersStale)
+        {
+            RefreshResizeHeaders();
+            return TryHitTestDivider(position, out columnKey, out isRightHalf);
+        }
+
+        return false;
+    }
+
+    private bool TryHitTestDivider(Point position, out string? columnKey, out bool isRightHalf)
+    {
+        columnKey = null;
+        isRightHalf = false;
+        _resizeHeadersStale = false;
+
         double halfGripWidth = 0;
         for (int i = 0; i < _resizeHeaders.Count; i++)
         {
@@ -735,9 +765,15 @@ public sealed partial class DynamicTableView : TableView
         {
             (TableViewColumnHeader header, Thumb grip) = _resizeHeaders[i];
             if (header.Column?.Header is not DynamicTableViewColumn definition ||
-                IndexOfColumn(Source.Columns, definition.Key) <= 0 ||
-                header.TranslatePoint(default, this) is not { } origin)
+                IndexOfColumn(Source.Columns, definition.Key) <= 0)
                 continue;
+
+            if (header.TranslatePoint(default, this) is not { } origin)
+            {
+                // The header is no longer part of the visual tree, so the cache is stale.
+                _resizeHeadersStale = true;
+                continue;
+            }
 
             double dividerCenter = origin.X - grip.Margin.Right - halfGripWidth;
             if (Math.Abs(position.X - dividerCenter) > halfGripWidth + hitTestTolerance ||
