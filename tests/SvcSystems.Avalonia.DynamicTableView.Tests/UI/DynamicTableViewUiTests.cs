@@ -1046,19 +1046,19 @@ public sealed class DynamicTableViewUiTests
             window.MouseUp(resizeEnd, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
             DynamicTableViewState state = table.CaptureState();
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[1].WidthMode);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[0].WidthMode);
 
             window.Width = 960;
             Dispatcher.UIThread.RunJobs();
             table.RestoreState(state);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
-            Assert.Equal(state.Columns[1].Width, table.Columns[1].Width.Value);
-            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(state.Columns[0].Width, table.Columns[0].Width.Value);
+            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
         }
         finally
         {
@@ -1067,7 +1067,7 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Resizing_between_memory_and_created_changes_created_column_width()
+    public void Resizing_between_memory_and_created_changes_memory_column_width()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> memory = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
@@ -1105,19 +1105,26 @@ public sealed class DynamicTableViewUiTests
             window.MouseMove(resizeMidpoint, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(new Cursor(StandardCursorType.SizeWestEast).ToString(), table.Cursor?.ToString());
-            Assert.Equal(initialMemoryWidth, table.Columns[0].ActualWidth);
-            Assert.True(table.Columns[1].ActualWidth < initialCreatedWidth,
-                "Dragging from the left side of the Memory/Created divider should resize Created.");
+            Assert.True(table.Columns[0].ActualWidth > initialMemoryWidth,
+                "Dragging from the left side of the Memory/Created divider should widen Memory.");
+            Assert.Equal(initialCreatedWidth, table.Columns[1].ActualWidth);
 
             window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
             window.MouseUp(resizeEnd, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
             Assert.False(table.Classes.Contains("dynamic-table-view-column-resizing"));
 
-            Assert.Equal(initialMemoryWidth, table.Columns[0].ActualWidth);
-            Assert.True(table.Columns[1].ActualWidth < initialCreatedWidth);
+            Assert.True(table.Columns[0].ActualWidth > initialMemoryWidth);
+            Assert.Equal(initialCreatedWidth, table.Columns[1].ActualWidth);
 
-            double createdWidthAfterLeftSideDrag = table.Columns[1].ActualWidth;
+            double memoryWidthAfterLeftSideDrag = table.Columns[0].ActualWidth;
+            memoryHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            resizeGrip = Assert.Single(memoryHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Memory header has no window position after resizing.");
             Point rightSideStart = new(dividerCenter.X + 6, dividerCenter.Y);
             Point rightSideMove = new(rightSideStart.X + 10, rightSideStart.Y);
             window.MouseDown(rightSideStart, MouseButton.Left);
@@ -1126,8 +1133,9 @@ public sealed class DynamicTableViewUiTests
             window.MouseMove(rightSideMove, RawInputModifiers.LeftMouseButton);
             window.MouseUp(rightSideMove, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
-            Assert.True(table.Columns[1].ActualWidth < createdWidthAfterLeftSideDrag,
-                "Dragging from the right side of the Memory/Created divider should also resize Created.");
+            Assert.True(table.Columns[0].ActualWidth > memoryWidthAfterLeftSideDrag,
+                "Dragging from the right side of the Memory/Created divider should also widen Memory.");
+            Assert.Equal(initialCreatedWidth, table.Columns[1].ActualWidth);
         }
         finally
         {

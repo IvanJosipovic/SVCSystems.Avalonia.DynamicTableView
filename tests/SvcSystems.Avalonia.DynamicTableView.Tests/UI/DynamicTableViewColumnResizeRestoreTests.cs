@@ -14,6 +14,43 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class DynamicTableViewColumnResizeRestoreTests
 {
     [AvaloniaFact]
+    public void Divider_drag_resizes_the_column_on_its_left()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> latency = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "latency", "Latency", static row => row.Name);
+        latency.WidthMode = DynamicTableViewWidthMode.Pixel;
+        latency.Width = 140;
+        DynamicTableViewColumn<DynamicTableViewTestRow> policy = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "policy", "Policy", static row => row.Id);
+        policy.WidthMode = DynamicTableViewWidthMode.Pixel;
+        policy.Width = 160;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [latency, policy]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 900, Height = 400, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            double initialLatencyWidth = table.Columns[0].ActualWidth;
+            double initialPolicyWidth = table.Columns[1].ActualWidth;
+            DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: 40);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].ActualWidth > initialLatencyWidth,
+                "Dragging the Latency/Policy divider right should widen Latency.");
+            Assert.Equal(initialPolicyWidth, table.Columns[1].ActualWidth, precision: 0);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Column_resizing_still_works_after_restoring_saved_state()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -30,12 +67,12 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
-            double resizedWidth = table.Columns[1].Width.Value;
-            Assert.Equal(110, resizedWidth);
+            double resizedWidth = table.Columns[0].Width.Value;
+            Assert.Equal(130, resizedWidth);
 
             DynamicTableViewState state = table.CaptureState();
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[1].WidthMode);
-            Assert.Equal(resizedWidth, state.Columns[1].Width);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[0].WidthMode);
+            Assert.Equal(resizedWidth, state.Columns[0].Width);
 
             // A reloaded view builds a new table and restores the previously saved widths.
             DynamicTableView restored = new() { Source = source, CanUserResizeColumns = true };
@@ -48,12 +85,12 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
                 restored.RestoreState(state);
                 Dispatcher.UIThread.RunJobs();
 
-                Assert.Equal(resizedWidth, restored.Columns[1].Width.Value);
+                Assert.Equal(resizedWidth, restored.Columns[0].Width.Value);
 
                 DragColumnDivider(restored, restoredWindow, leftColumnIndex: 0, deltaX: 40);
                 Dispatcher.UIThread.RunJobs();
 
-                Assert.Equal(resizedWidth - 40, restored.Columns[1].Width.Value);
+                Assert.Equal(resizedWidth + 40, restored.Columns[0].Width.Value);
             }
             finally
             {
@@ -85,8 +122,8 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             DragColumnDivider(table, host, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
-            double resizedWidth = table.Columns[1].Width.Value;
-            Assert.Equal(110, resizedWidth);
+            double resizedWidth = table.Columns[0].Width.Value;
+            Assert.Equal(130, resizedWidth);
 
             DynamicTableViewState state = table.CaptureState();
 
@@ -99,12 +136,12 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             table.RestoreState(state);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(resizedWidth, table.Columns[1].Width.Value);
+            Assert.Equal(resizedWidth, table.Columns[0].Width.Value);
 
             DragColumnDivider(table, host, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(resizedWidth - 40, table.Columns[1].Width.Value);
+            Assert.Equal(resizedWidth + 40, table.Columns[0].Width.Value);
         }
         finally
         {
@@ -194,7 +231,7 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(110, table.Columns[1].Width.Value);
+            Assert.Equal(130, table.Columns[0].Width.Value);
         }
         finally
         {
@@ -227,7 +264,7 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
 
     /// <summary>
     /// Drags the divider that sits on the right edge of <paramref name="leftColumnIndex"/>.
-    /// That divider resizes the column to its right.
+    /// That divider resizes the column to its left.
     /// </summary>
     private static void DragColumnDivider(
         DynamicTableView table,
