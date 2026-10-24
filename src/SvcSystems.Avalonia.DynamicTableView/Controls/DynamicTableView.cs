@@ -421,14 +421,14 @@ public sealed partial class DynamicTableView : TableView
         if (resizeIndex <= 0)
             return;
 
-        DynamicTableViewColumn definition = Source.Columns[resizeIndex];
+        DynamicTableViewColumn definition = Source.Columns[resizeIndex - 1];
         if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
             return;
 
         double currentWidth = native.Width.GridUnitType == GridUnitType.Pixel
             ? native.Width.Value
             : native.ActualWidth;
-        double newWidth = Math.Max(definition.MinWidth, currentWidth - deltaX);
+        double newWidth = Math.Max(definition.MinWidth, currentWidth + deltaX);
         _manuallySizedColumns.Add(definition.Key);
         definition.WidthMode = DynamicTableViewWidthMode.Pixel;
         definition.Width = newWidth;
