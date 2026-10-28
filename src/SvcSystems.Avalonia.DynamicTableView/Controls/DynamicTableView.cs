@@ -738,9 +738,12 @@ public sealed partial class DynamicTableView : TableView
         if (!_headerDragStarted && Math.Abs(current.X - _pointerDownPosition.X) < 5)
             return;
         _headerDragStarted = true;
-        if (FindHeader(e.Source) is not { } targetHeader || Source is null)
+        // Pointer capture can keep the routed source on the pressed header.
+        // Use the visual under the pointer, including native header padding.
+        var targetColumn = FindHeader(pointerVisual)?.NativeColumn ?? FindColumnHeader(pointerVisual)?.Column;
+        if (targetColumn is null || Source is null)
             return;
-        var targetIndex = Columns.IndexOf(targetHeader.NativeColumn);
+        var targetIndex = Columns.IndexOf(targetColumn);
         if (targetIndex < 0 || targetIndex == _pointerDownColumn)
             return;
         Source.Columns.Move(_pointerDownColumn, targetIndex);
