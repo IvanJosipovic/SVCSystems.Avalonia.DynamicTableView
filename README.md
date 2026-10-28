@@ -114,5 +114,3 @@ for rows in 100 1000 10000; do
     --filter "*ResizeStarColumns*$rows)" --inProcess --warmupCount 2 --iterationCount 5
 done
 ```
-
-Benchmark results depend on machine and runtime. See [the column sizing measurements](benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks/ColumnSizingResults.md) for the comparison and limitations.
