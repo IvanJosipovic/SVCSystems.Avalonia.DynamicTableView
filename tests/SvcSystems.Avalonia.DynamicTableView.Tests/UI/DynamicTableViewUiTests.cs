@@ -960,6 +960,42 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Hidden_star_columns_do_not_reduce_visible_star_column_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.Width = 1;
+        first.MinWidth = 120;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Id);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.Width = 1;
+        second.MinWidth = 120;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 420, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            double firstWidthWithBothVisible = table.Columns[0].ActualWidth;
+
+            table.Columns[1].IsVisible = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].ActualWidth > firstWidthWithBothVisible + 100);
+            Assert.False(table.Columns[1].IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Resize_grip_shows_resize_cursor_when_hovered()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

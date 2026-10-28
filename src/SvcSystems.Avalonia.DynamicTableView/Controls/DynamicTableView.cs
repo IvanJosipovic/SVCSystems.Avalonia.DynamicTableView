@@ -484,6 +484,8 @@ public sealed partial class DynamicTableView : TableView
         for (int index = 0; index < Columns.Count; index++)
         {
             TableViewColumn native = Columns[index];
+            if (!native.IsVisible)
+                continue;
             if (native.Header is not DynamicTableViewColumn definition)
                 continue;
             if (definition.WidthMode == DynamicTableViewWidthMode.Star)
@@ -501,7 +503,7 @@ public sealed partial class DynamicTableView : TableView
             bool constrained = false;
             for (int index = 0; index < Columns.Count; index++)
             {
-                if (Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
+                if (!Columns[index].IsVisible || Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
                     continue;
                 double columnWeight = Math.Max(0.1, definition.Width);
                 double threshold = definition.MinWidth / columnWeight;
@@ -521,7 +523,7 @@ public sealed partial class DynamicTableView : TableView
         for (int index = 0; index < Columns.Count; index++)
         {
             TableViewColumn native = Columns[index];
-            if (native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
+            if (!native.IsVisible || native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
                 continue;
             GridLength width = Math.Max(0.1, definition.Width) * unitWidth < definition.MinWidth
                 ? new GridLength(definition.MinWidth)
