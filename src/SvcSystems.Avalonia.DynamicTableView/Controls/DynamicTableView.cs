@@ -45,6 +45,9 @@ public sealed partial class DynamicTableView : TableView
     private IReadOnlyList<DynamicTableViewFilterDescriptor> _headerFilters = [];
     private IDynamicTableViewSource? _attachedSource;
     private bool _autoWidthPassQueued;
+    private bool _starWidthUpdateQueued;
+    private readonly Action _updateStarWidths;
+    private ScrollViewer? _scrollViewer;
     private bool _headerRefreshQueued;
     private bool _restoringState;
     private Vector? _pendingScrollOffset;
@@ -68,6 +71,7 @@ public sealed partial class DynamicTableView : TableView
     /// <summary>Creates an empty dynamic table.</summary>
     public DynamicTableView()
     {
+        _updateStarWidths = UpdateStarColumnMinimumWidths;
         Classes.Add("dynamic-table-view");
         UpdateGridLinesClass();
         AutoScrollToSelectedItem = false;
@@ -188,6 +192,7 @@ public sealed partial class DynamicTableView : TableView
         base.OnAttachedToVisualTree(e);
         _resizeHeadersDirty = true;
         LayoutUpdated += OnLayoutUpdated;
+        QueueStarColumnMinimumWidthUpdate();
         QueueHeaderRefresh();
         QueueAutoWidthPass();
         QueueScrollRestore();
@@ -198,11 +203,13 @@ public sealed partial class DynamicTableView : TableView
         LayoutUpdated -= OnLayoutUpdated;
         _resizeHeadersDirty = true;
         _resizeHeaders.Clear();
+        _scrollViewer = null;
         base.OnDetachedFromVisualTree(e);
     }
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
+        _scrollViewer = null;
         base.OnApplyTemplate(e);
         _resizeHeadersDirty = true;
     }
@@ -440,10 +447,88 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnLayoutUpdated(object? sender, EventArgs e)
     {
+        QueueStarColumnMinimumWidthUpdate();
         if (_resizeHeadersDirty)
             RefreshResizeHeaders();
         TryRestorePendingScrollOffset();
         QueueAutoWidthPass();
+    }
+
+    private void QueueStarColumnMinimumWidthUpdate()
+    {
+        if (_starWidthUpdateQueued || Source is null || VisualRoot is null)
+            return;
+
+        for (int index = 0; index < Columns.Count; index++)
+        {
+            if (Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star })
+                continue;
+
+            _starWidthUpdateQueued = true;
+            Dispatcher.UIThread.Post(_updateStarWidths, DispatcherPriority.Background);
+            return;
+        }
+    }
+
+    private void UpdateStarColumnMinimumWidths()
+    {
+        _starWidthUpdateQueued = false;
+        if (Source is null || VisualRoot is null)
+            return;
+
+        double availableWidth = FindScrollViewer()?.Viewport.Width ?? Bounds.Width;
+        if (!double.IsFinite(availableWidth) || availableWidth <= 0)
+            return;
+
+        double weight = 0;
+        for (int index = 0; index < Columns.Count; index++)
+        {
+            TableViewColumn native = Columns[index];
+            if (native.Header is not DynamicTableViewColumn definition)
+                continue;
+            if (definition.WidthMode == DynamicTableViewWidthMode.Star)
+                weight += Math.Max(0.1, definition.Width);
+            else if (double.IsFinite(native.ActualWidth))
+                availableWidth -= native.ActualWidth;
+        }
+
+        // Reserve minima before distributing the remaining space by star weight.
+        // Each pass removes at least one constrained column, without scratch storage.
+        double unitWidth = weight > 0 ? Math.Max(0, availableWidth) / weight : 0;
+        double previousUnitWidth = double.PositiveInfinity;
+        while (weight > 0)
+        {
+            bool constrained = false;
+            for (int index = 0; index < Columns.Count; index++)
+            {
+                if (Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
+                    continue;
+                double columnWeight = Math.Max(0.1, definition.Width);
+                double threshold = definition.MinWidth / columnWeight;
+                if (threshold > unitWidth && threshold <= previousUnitWidth)
+                {
+                    availableWidth -= definition.MinWidth;
+                    weight -= columnWeight;
+                    constrained = true;
+                }
+            }
+            if (!constrained)
+                break;
+            previousUnitWidth = unitWidth;
+            unitWidth = weight > 0 ? Math.Max(0, availableWidth) / weight : 0;
+        }
+
+        for (int index = 0; index < Columns.Count; index++)
+        {
+            TableViewColumn native = Columns[index];
+            if (native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
+                continue;
+            GridLength width = Math.Max(0.1, definition.Width) * unitWidth < definition.MinWidth
+                ? new GridLength(definition.MinWidth)
+                : GetInitialWidth(definition);
+            if (native.Width != width)
+                native.Width = width;
+        }
     }
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -487,7 +572,7 @@ public sealed partial class DynamicTableView : TableView
     }
 
     private ScrollViewer? FindScrollViewer()
-        => this.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        => _scrollViewer ??= this.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
 
     private void QueueAutoWidthPass()
     {

@@ -101,7 +101,18 @@ dotnet run --project samples/SvcSystems.Avalonia.DynamicTableView.Sample
 Run input benchmarks in Release mode:
 
 ```bash
-dotnet run -c Release --project benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks -- --filter '*DynamicTableViewInputBenchmarks*'
+dotnet run -c Release --project benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks -- --filter '*DynamicTableViewInputBenchmarks*' --inProcess
 ```
 
-The library and tests target .NET 11; benchmarks target .NET 10. Benchmark results depend on machine and runtime.
+The library, tests, and benchmarks target .NET 11. BenchmarkDotNet 0.15.8 does not recognize this runtime in its default out-of-process toolchain; use `--inProcess` with this SDK.
+
+Run each headless UI case in a separate invocation so Avalonia is initialized once on its owning thread. For example:
+
+```bash
+for rows in 100 1000 10000; do
+  dotnet run -c Release --project benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks -- \
+    --filter "*ResizeStarColumns*$rows)" --inProcess --warmupCount 2 --iterationCount 5
+done
+```
+
+Benchmark results depend on machine and runtime. See [the column sizing measurements](benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks/ColumnSizingResults.md) for the comparison and limitations.

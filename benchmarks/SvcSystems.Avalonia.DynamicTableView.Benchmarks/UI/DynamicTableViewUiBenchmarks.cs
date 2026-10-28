@@ -24,7 +24,6 @@ public class DynamicTableViewUiBenchmarks : IDisposable
     private Button _filterButton = null!;
     private int _contextTargetCount;
     private bool _longName;
-    private bool _fixedWidths;
 
     [Params(100, 1_000, 10_000)]
     public int RowCount { get; set; }
@@ -55,6 +54,40 @@ public class DynamicTableViewUiBenchmarks : IDisposable
                 control.DataContext is DynamicTableViewColumn column && column.Key == "name");
         _filterButton = header.GetVisualDescendants().OfType<Button>()
             .Single(static button => button.Classes.Contains("dynamic-table-view-filter-button"));
+    }
+
+    [GlobalSetup(Target = nameof(FixedWidthAfterSourceUpdate))]
+    public void SetupFixedWidths()
+    {
+        Setup();
+        for (int index = 0; index < _source.Columns.Count; index++)
+            _source.Columns[index].WidthMode = DynamicTableViewWidthMode.Pixel;
+        _table.RestoreState(_table.CaptureState());
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [GlobalSetup(Target = nameof(ResizeStarColumns))]
+    public void SetupStarWidths()
+    {
+        Setup();
+        for (int index = 2; index < _source.Columns.Count; index++)
+        {
+            _source.Columns[index].MinWidth = 20;
+            _source.Columns[index].WidthMode = DynamicTableViewWidthMode.Pixel;
+            _source.Columns[index].Width = 20;
+        }
+        _source.Columns[0].Width = 1;
+        _source.Columns[0].WidthMode = DynamicTableViewWidthMode.Star;
+        _source.Columns[1].WidthMode = DynamicTableViewWidthMode.Star;
+        _source.Columns[1].Width = 2;
+        var columns = new DynamicTableViewColumnState[_source.Columns.Count];
+        for (int index = 0; index < columns.Length; index++)
+        {
+            DynamicTableViewColumn column = _source.Columns[index];
+            columns[index] = new(column.Key, index, column.Width, column.WidthMode);
+        }
+        _table.RestoreState(new DynamicTableViewState(columns, [], []));
+        Dispatcher.UIThread.RunJobs();
     }
 
     [GlobalCleanup]
@@ -96,18 +129,20 @@ public class DynamicTableViewUiBenchmarks : IDisposable
     [Benchmark]
     public double FixedWidthAfterSourceUpdate()
     {
-        if (!_fixedWidths)
-        {
-            for (var index = 0; index < _source.Columns.Count; index++)
-                _source.Columns[index].WidthMode = DynamicTableViewWidthMode.Pixel;
-            _fixedWidths = true;
-        }
         _longName = !_longName;
         var visibleRow = _table.GetVisualDescendants().OfType<TableViewRow>().First();
         var current = (DynamicTableViewBenchmarkRow)visibleRow.DataContext!;
         _cache.AddOrUpdate(current with { Name = _longName ? new string('W', 200) : $"Item {current.Id:D5}" });
         Dispatcher.UIThread.RunJobs();
         return _table.Columns[1].ActualWidth;
+    }
+
+    [Benchmark]
+    public double ResizeStarColumns()
+    {
+        _window.Width = _window.Width == 1000 ? 350 : 1000;
+        Dispatcher.UIThread.RunJobs();
+        return _table.Columns[0].ActualWidth;
     }
 
     [Benchmark]
