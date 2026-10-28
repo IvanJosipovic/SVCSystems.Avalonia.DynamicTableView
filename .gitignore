@@ -401,3 +401,17 @@ FodyWeavers.xsd
 *.sln.iml
 
 *.lscache
+
+# APM dependencies
+apm_modules/
+.claude/
+.github/lsp.json
+.github/mcp.json
+.agents/
+.opencode/
+.cursor/
+.codex
+.github/agents
+.gemini/
+.mcp.json
+opencode.json

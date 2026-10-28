@@ -1297,41 +1297,90 @@ public sealed class DynamicTableViewUiTests
         }
     }
 
-    [AvaloniaFact]
-    public void Dragging_a_header_reorders_the_source_and_native_columns()
+    [AvaloniaTheory]
+    [InlineData(0, 1)]
+    [InlineData(1, 0)]
+    [InlineData(0, 3)]
+    [InlineData(3, 0)]
+    public void Dragging_a_header_reorders_the_source_and_native_columns(int from, int to)
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
-        source.Columns[0].WidthMode = DynamicTableViewWidthMode.Pixel;
-        source.Columns[0].Width = 150;
-        source.Columns[1].WidthMode = DynamicTableViewWidthMode.Pixel;
-        source.Columns[1].Width = 230;
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        foreach (var column in source.Columns)
+        {
+            column.WidthMode = DynamicTableViewWidthMode.Pixel;
+            column.Width = 120 + 10 * source.Columns.IndexOf(column);
+        }
+        var expected = source.Columns.ToList();
+        var moved = expected[from];
+        expected.RemoveAt(from);
+        expected.Insert(to, moved);
         DynamicTableView table = new() { Source = source };
-        Window window = new() { Width = 800, Height = 260, Content = table };
+        Window window = new() { Width = 900, Height = 300, Content = table };
 
         try
         {
             window.Show();
             Dispatcher.UIThread.RunJobs();
-            var firstHeader = GetHeaderControl(table, 0);
-            var secondHeader = GetHeaderControl(table, 1);
-            var start = firstHeader.TranslatePoint(new Point(firstHeader.Bounds.Width / 2, firstHeader.Bounds.Height / 2), window);
-            var target = secondHeader.TranslatePoint(new Point(secondHeader.Bounds.Width / 2, secondHeader.Bounds.Height / 2), window);
-            Assert.NotNull(start);
-            Assert.NotNull(target);
-
-            window.MouseDown(start!.Value, MouseButton.Left);
-            window.MouseMove(target!.Value);
-            window.MouseUp(target.Value, MouseButton.Left);
+            DragHeader(from, to);
+            AssertOrder();
+            var saved = table.CaptureState();
+            window.Content = null;
             Dispatcher.UIThread.RunJobs();
+            window.Content = table;
+            Dispatcher.UIThread.RunJobs();
+            AssertOrder();
+            table.RestoreState(saved);
+            Dispatcher.UIThread.RunJobs();
+            AssertOrder();
 
-            Assert.Equal("age", source.Columns[1].Key);
-            Assert.Equal(230, table.Columns[1].Width.Value);
-            Assert.Equal(source.Columns.Count, table.Columns.Count);
+            // A second gesture must use the new order and preserve column identity and widths.
+            expected.RemoveAt(to);
+            expected.Insert(from, moved);
+            DragHeader(to, from);
+            AssertOrder();
+            Assert.Empty(source.SortDescriptors);
         }
         finally
         {
             window.Close();
+        }
+
+        void DragHeader(int startIndex, int targetIndex)
+        {
+            var start = HeaderCenter(startIndex);
+            var target = HeaderCenter(targetIndex);
+            window.MouseDown(start, MouseButton.Left);
+            window.MouseMove(target, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(target, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Point HeaderCenter(int index)
+        {
+            var header = GetHeaderControl(table, index);
+            return header.TranslatePoint(new Point(header.Bounds.Width / 2, header.Bounds.Height / 2), window)!.Value;
+        }
+
+        void AssertOrder()
+        {
+            Assert.Equal(expected, source.Columns);
+            Assert.Equal(expected, table.Columns.Select(column => column.Header));
+            Assert.Equal(expected.Select(column => column.Width), table.Columns.Select(column => column.Width.Value));
+            var headers = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .OrderBy(header => header.TranslatePoint(default, table)!.Value.X).ToArray();
+            Assert.Equal(expected, headers.Select(header => header.Column!.Header));
+            var rows = table.GetVisualDescendants().OfType<TableViewRow>()
+                .Where(row => row.DataContext is DynamicTableViewTestRow).ToArray();
+            Assert.NotEmpty(rows);
+            foreach (var row in rows)
+            {
+                var cells = row.GetVisualDescendants().OfType<TableViewCell>()
+                    .OrderBy(cell => cell.TranslatePoint(default, table)!.Value.X);
+                Assert.Equal(expected, cells.Select(cell => cell.Column!.Header));
+            }
+            Assert.Equal(expected.Select(column => column.Key), table.CaptureState().Columns.Select(column => column.Key));
         }
     }
 
