@@ -912,6 +912,13 @@ public sealed partial class DynamicTableView : TableView
         if (Selection is not { } selection || _selectionDragInitialSelection is not { } initialSelection)
             return;
 
+        if (selection.SingleSelect)
+        {
+            selection.Select(targetIndex);
+            _selectionDragLast = targetIndex;
+            return;
+        }
+
         var anchor = _selectionDragAnchor;
         var previousStart = Math.Min(anchor, _selectionDragLast);
         var previousEnd = Math.Max(anchor, _selectionDragLast);

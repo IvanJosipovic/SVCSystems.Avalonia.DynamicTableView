@@ -1493,6 +1493,40 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Dragging_in_single_select_mode_follows_the_pointer_in_both_directions()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        cache.AddOrUpdate(Enumerable.Range(0, 12).Select(index =>
+            new DynamicTableViewTestRow($"row-{index:D2}", $"Item {index:D2}", index, DateTimeOffset.UnixEpoch, true, DynamicTableViewTestState.Ready)));
+        source.SelectionModel.SingleSelect = true;
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 700, Height = 420, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var first = GetRowCenter(window, table, "row-00");
+            var fifth = GetRowCenter(window, table, "row-04");
+            var tenth = GetRowCenter(window, table, "row-09");
+            window.MouseDown(fifth, MouseButton.Left);
+            window.MouseMove(tenth, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(9, source.SelectionModel.SelectedIndex);
+
+            window.MouseMove(first, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(0, source.SelectionModel.SelectedIndex);
+            window.MouseUp(first, MouseButton.Left);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Dragging_across_rows_selects_and_deselects_range_while_left_button_is_held()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
