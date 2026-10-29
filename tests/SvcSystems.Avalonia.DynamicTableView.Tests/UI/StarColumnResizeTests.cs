@@ -36,18 +36,15 @@ public sealed class StarColumnResizeTests
                     DynamicTableView table = Assert.Single(window.GetVisualDescendants().OfType<DynamicTableView>());
                     Assert.Equal(expectedModes, table.Source!.Columns.Select(static column => column.WidthMode));
                     double[] widths = table.Columns.Select(static column => column.ActualWidth).ToArray();
-                    TableViewColumnHeader header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
-                        .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[target]));
-                    double left = header.TranslatePoint(default, window)!.Value.X;
-
                     DragColumnDivider(table, window, target, 30);
 
-                    Assert.InRange(Math.Abs(header.TranslatePoint(default, window)!.Value.X - left), 0, 1);
                     Assert.InRange(table.Columns[target].ActualWidth - widths[target], 29, 31);
                     Assert.Equal(DynamicTableViewWidthMode.Pixel, table.Source.Columns[target].WidthMode);
                     for (int index = 0; index < expectedModes.Length; index++)
                     {
-                        if (index != target && (index < target || expectedModes[index] != DynamicTableViewWidthMode.Star))
+                        if (index != target)
+                            Assert.Equal(expectedModes[index], table.Source.Columns[index].WidthMode);
+                        if (index != target && expectedModes[index] != DynamicTableViewWidthMode.Star)
                             Assert.InRange(Math.Abs(table.Columns[index].ActualWidth - widths[index]), 0, 1);
                     }
                 }
@@ -94,19 +91,15 @@ public sealed class StarColumnResizeTests
                     window.Show();
                     Dispatcher.UIThread.RunJobs();
                     double[] widths = table.Columns.Select(static column => column.ActualWidth).ToArray();
-                    TableViewColumnHeader header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
-                        .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[target]));
-                    double left = header.TranslatePoint(default, window)!.Value.X;
-
                     DragColumnDivider(table, window, target, 30);
 
-                    double resizedLeft = header.TranslatePoint(default, window)!.Value.X;
-                    Assert.InRange(Math.Abs(resizedLeft - left), 0, 1);
                     Assert.InRange(table.Columns[target].ActualWidth - widths[target], 29, 31);
                     Assert.Equal(DynamicTableViewWidthMode.Pixel, columns[target].WidthMode);
                     for (int index = 0; index < columns.Length; index++)
                     {
-                        if (index != target && (index < target || layout[index] != DynamicTableViewWidthMode.Star))
+                        if (index != target)
+                            Assert.Equal(layout[index], columns[index].WidthMode);
+                        if (index != target && layout[index] != DynamicTableViewWidthMode.Star)
                             Assert.InRange(Math.Abs(table.Columns[index].ActualWidth - widths[index]), 0, 1);
                     }
                 }
@@ -165,8 +158,17 @@ public sealed class StarColumnResizeTests
             // The second column should have grown, first should stay the same
             Assert.True(table.Columns[1].ActualWidth > initialSecondWidth,
                 "Dragging the Second/Third divider right should widen the Second column.");
-            Assert.Equal(initialFirstWidth, table.Columns[0].ActualWidth, precision: 1);
+            Assert.True(table.Columns[0].ActualWidth < initialFirstWidth);
+            Assert.Equal(DynamicTableViewWidthMode.Star, first.WidthMode);
+            Assert.Equal(1, first.Width);
             Assert.Equal(initialThirdWidth, table.Columns[2].ActualWidth, precision: 0);
+            DynamicTableViewState state = table.CaptureState();
+            Assert.Equal(DynamicTableViewWidthMode.Star, state.Columns[0].WidthMode);
+            double redistributedWidth = table.Columns[0].ActualWidth;
+            window.Width += 200;
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(table.Columns[0].ActualWidth > redistributedWidth);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
         }
         finally
         {

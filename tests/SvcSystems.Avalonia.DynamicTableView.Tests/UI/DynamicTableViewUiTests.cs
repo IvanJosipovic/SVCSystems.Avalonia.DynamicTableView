@@ -1244,7 +1244,7 @@ public sealed class DynamicTableViewUiTests
 
             Assert.True(table.Columns[1].ActualWidth > initialSecondStarWidth,
                 "Dragging right on the divider between first and second Star should widen the second Star column.");
-            Assert.Equal(initialFirstStarWidth, table.Columns[0].ActualWidth, precision: 1);
+            Assert.True(table.Columns[0].ActualWidth < initialFirstStarWidth);
             
             // Header and Cells columns should remain unchanged
             Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
@@ -1254,8 +1254,8 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
             Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
             
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
-            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
         }
         finally
         {
@@ -1468,7 +1468,7 @@ public sealed class DynamicTableViewUiTests
 
             Assert.True(table.Columns[1].ActualWidth > initialSecondStarWidth,
                 "Dragging right on the right side of the second Star divider should also widen the second Star column.");
-            Assert.Equal(initialFirstStarWidth, table.Columns[0].ActualWidth, precision: 1);
+            Assert.True(table.Columns[0].ActualWidth < initialFirstStarWidth);
             
             // Header column should remain unchanged
             Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
@@ -1477,8 +1477,8 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
             Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
             
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
-            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
         }
         finally
         {

@@ -436,24 +436,6 @@ public sealed partial class DynamicTableView : TableView
             ? native.Width.Value
             : native.ActualWidth;
         double newWidth = Math.Max(definition.MinWidth, currentWidth + deltaX);
-        List<(DynamicTableViewColumn Definition, TableViewColumn Native, double Width)> precedingStars = [];
-        for (int index = 0; index < resizeIndex; index++)
-        {
-            DynamicTableViewColumn preceding = Source.Columns[index];
-            if (preceding.WidthMode != DynamicTableViewWidthMode.Star ||
-                !_nativeColumns.TryGetValue(preceding.Key, out TableViewColumn? precedingNative) ||
-                !precedingNative.IsVisible)
-                continue;
-
-            precedingStars.Add((preceding, precedingNative, precedingNative.ActualWidth));
-        }
-        foreach ((DynamicTableViewColumn preceding, TableViewColumn precedingNative, double precedingWidth) in precedingStars)
-        {
-            _manuallySizedColumns.Add(preceding.Key);
-            preceding.WidthMode = DynamicTableViewWidthMode.Pixel;
-            preceding.Width = precedingWidth;
-            precedingNative.Width = new GridLength(precedingWidth);
-        }
         _manuallySizedColumns.Add(definition.Key);
         definition.WidthMode = DynamicTableViewWidthMode.Pixel;
         definition.Width = newWidth;
