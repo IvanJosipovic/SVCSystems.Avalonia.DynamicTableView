@@ -436,6 +436,24 @@ public sealed partial class DynamicTableView : TableView
             ? native.Width.Value
             : native.ActualWidth;
         double newWidth = Math.Max(definition.MinWidth, currentWidth + deltaX);
+        List<(DynamicTableViewColumn Definition, TableViewColumn Native, double Width)> precedingStars = [];
+        for (int index = 0; index < resizeIndex - 1; index++)
+        {
+            DynamicTableViewColumn preceding = Source.Columns[index];
+            if (preceding.WidthMode != DynamicTableViewWidthMode.Star ||
+                !_nativeColumns.TryGetValue(preceding.Key, out TableViewColumn? precedingNative) ||
+                !precedingNative.IsVisible)
+                continue;
+
+            precedingStars.Add((preceding, precedingNative, precedingNative.ActualWidth));
+        }
+        foreach ((DynamicTableViewColumn preceding, TableViewColumn precedingNative, double precedingWidth) in precedingStars)
+        {
+            _manuallySizedColumns.Add(preceding.Key);
+            preceding.WidthMode = DynamicTableViewWidthMode.Pixel;
+            preceding.Width = precedingWidth;
+            precedingNative.Width = new GridLength(precedingWidth);
+        }
         _manuallySizedColumns.Add(definition.Key);
         definition.WidthMode = DynamicTableViewWidthMode.Pixel;
         definition.Width = newWidth;
@@ -837,41 +855,37 @@ public sealed partial class DynamicTableView : TableView
         isRightHalf = false;
         _resizeHeadersStale = false;
 
-        double halfGripWidth = 0;
+        const double hitTestTolerance = 1;
         for (int i = 0; i < _resizeHeaders.Count; i++)
         {
             (TableViewColumnHeader header, Thumb grip) = _resizeHeaders[i];
-            if (grip.Bounds.Width <= 0)
+            if (header.Column?.Header is not DynamicTableViewColumn definition)
+                continue;
+            int columnIndex = IndexOfColumn(Source!.Columns, definition.Key);
+            if (columnIndex < 0 || columnIndex + 1 >= Source.Columns.Count || !grip.IsVisible)
                 continue;
 
-            halfGripWidth = grip.Bounds.Width / 2;
-            break;
-        }
-        if (halfGripWidth <= 0)
-            return false;
-
-        const double hitTestTolerance = 0.1;
-        for (int i = 0; i < _resizeHeaders.Count; i++)
-        {
-            (TableViewColumnHeader header, Thumb grip) = _resizeHeaders[i];
-            if (header.Column?.Header is not DynamicTableViewColumn definition ||
-                IndexOfColumn(Source.Columns, definition.Key) <= 0)
-                continue;
-
-            if (header.TranslatePoint(default, this) is not { } origin)
+            // Get the grip's actual position in the table's coordinate system
+            if (grip.TranslatePoint(default, this) is not { } gripOrigin)
             {
-                // The header is no longer part of the visual tree, so the cache is stale.
+                // The grip is no longer part of the visual tree, so the cache is stale.
                 _resizeHeadersStale = true;
                 continue;
             }
 
-            double dividerCenter = origin.X - grip.Margin.Right - halfGripWidth;
-            if (Math.Abs(position.X - dividerCenter) > halfGripWidth + hitTestTolerance ||
-                position.Y < origin.Y - hitTestTolerance ||
-                position.Y > origin.Y + header.Bounds.Height + hitTestTolerance)
+            double halfGripWidth = grip.Bounds.Width / 2;
+            if (halfGripWidth <= 0)
                 continue;
 
-            columnKey = definition.Key;
+            // The divider center is at the center of the grip
+            double dividerCenter = gripOrigin.X + halfGripWidth;
+            
+            if (Math.Abs(position.X - dividerCenter) > halfGripWidth + hitTestTolerance ||
+                position.Y < gripOrigin.Y - hitTestTolerance ||
+                position.Y > gripOrigin.Y + grip.Bounds.Height + hitTestTolerance)
+                continue;
+
+            columnKey = Source.Columns[columnIndex + 1].Key;
             isRightHalf = position.X >= dividerCenter;
             return true;
         }

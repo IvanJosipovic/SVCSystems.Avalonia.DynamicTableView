@@ -1180,6 +1180,313 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Resizing_second_star_column_when_first_is_also_star_resizes_correct_column()
+    {
+        // Scenario: first two columns are Star, third is Header, fourth is Cells
+        // User resizes the divider between the two Star columns (second Star column)
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> firstStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first-star", "First Star", static row => row.Name);
+        firstStar.WidthMode = DynamicTableViewWidthMode.Star;
+        firstStar.Width = 1;
+        firstStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> secondStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second-star", "Second Star", static row => row.Id);
+        secondStar.WidthMode = DynamicTableViewWidthMode.Star;
+        secondStar.Width = 2;
+        secondStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> headerColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        headerColumn.WidthMode = DynamicTableViewWidthMode.Header;
+        headerColumn.MinWidth = 100;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> cellsColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name);
+        cellsColumn.WidthMode = DynamicTableViewWidthMode.Cells;
+        cellsColumn.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [firstStar, secondStar, headerColumn, cellsColumn]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the second Star column header (index 1)
+            var secondStarHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[1]));
+            var resizeGrip = Assert.Single(secondStarHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            // Click on the LEFT side of the grip (should resize the second Star column)
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y); // Left side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialFirstStarWidth = table.Columns[0].ActualWidth;
+            double initialSecondStarWidth = table.Columns[1].ActualWidth;
+            double initialHeaderWidth = table.Columns[2].ActualWidth;
+            double initialCellsWidth = table.Columns[3].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[1].ActualWidth > initialSecondStarWidth,
+                "Dragging right on the divider between first and second Star should widen the second Star column.");
+            Assert.Equal(initialFirstStarWidth, table.Columns[0].ActualWidth, precision: 1);
+            
+            // Header and Cells columns should remain unchanged
+            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+            Assert.Equal(initialCellsWidth, table.Columns[3].ActualWidth, precision: 1);
+
+            // The second Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
+            
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_between_star_and_header_resizes_star_column()
+    {
+        // Scenario: first column is Star, second is Header
+        // User resizes the divider between Star and Header
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name);
+        star.WidthMode = DynamicTableViewWidthMode.Star;
+        star.Width = 1;
+        star.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> header = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        header.WidthMode = DynamicTableViewWidthMode.Header;
+        header.MinWidth = 100;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name);
+        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        cells.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [star, header, cells]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the Star column header (index 0) - its grip is the divider between Star and Header
+            var starHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeGrip = Assert.Single(starHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y); // Left side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialStarWidth = table.Columns[0].ActualWidth;
+            double initialHeaderWidth = table.Columns[1].ActualWidth;
+            double initialCellsWidth = table.Columns[2].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            // The Star column (index 0) should widen
+            Assert.True(table.Columns[0].ActualWidth > initialStarWidth,
+                "Dragging right on the divider between Star and Header should widen the Star column.");
+            
+            // Header and Cells columns should remain unchanged
+            Assert.Equal(initialHeaderWidth, table.Columns[1].ActualWidth, precision: 1);
+            Assert.Equal(initialCellsWidth, table.Columns[2].ActualWidth, precision: 1);
+
+            // The Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_between_star_and_cells_resizes_star_column()
+    {
+        // Scenario: first column is Star, second is Cells
+        // User resizes the divider between Star and Cells
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name);
+        star.WidthMode = DynamicTableViewWidthMode.Star;
+        star.Width = 1;
+        star.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name);
+        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        cells.MinWidth = 100;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> header = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        header.WidthMode = DynamicTableViewWidthMode.Header;
+        header.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [star, cells, header]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the Star column header (index 0) - its grip is the divider between Star and Cells
+            var starHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeGrip = Assert.Single(starHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y); // Left side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialStarWidth = table.Columns[0].ActualWidth;
+            double initialCellsWidth = table.Columns[1].ActualWidth;
+            double initialHeaderWidth = table.Columns[2].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            // The Star column (index 0) should widen
+            Assert.True(table.Columns[0].ActualWidth > initialStarWidth,
+                "Dragging right on the divider between Star and Cells should widen the Star column.");
+            
+            // Cells and Header columns should remain unchanged
+            Assert.Equal(initialCellsWidth, table.Columns[1].ActualWidth, precision: 1);
+            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+
+            // The Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_second_star_column_right_side_also_resizes_second_star()
+    {
+        // Scenario: first two columns are Star
+        // User clicks on the RIGHT side of the second Star column's grip (should still resize second Star)
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> firstStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first-star", "First Star", static row => row.Name);
+        firstStar.WidthMode = DynamicTableViewWidthMode.Star;
+        firstStar.Width = 1;
+        firstStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> secondStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second-star", "Second Star", static row => row.Id);
+        secondStar.WidthMode = DynamicTableViewWidthMode.Star;
+        secondStar.Width = 2;
+        secondStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> headerColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        headerColumn.WidthMode = DynamicTableViewWidthMode.Header;
+        headerColumn.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [firstStar, secondStar, headerColumn]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the second Star column header (index 1)
+            var secondStarHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[1]));
+            var resizeGrip = Assert.Single(secondStarHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            // Click on the RIGHT side of the grip (should still resize the second Star column)
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X + 6, dividerCenter.Y); // Right side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialFirstStarWidth = table.Columns[0].ActualWidth;
+            double initialSecondStarWidth = table.Columns[1].ActualWidth;
+            double initialHeaderWidth = table.Columns[2].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[1].ActualWidth > initialSecondStarWidth,
+                "Dragging right on the right side of the second Star divider should also widen the second Star column.");
+            Assert.Equal(initialFirstStarWidth, table.Columns[0].ActualWidth, precision: 1);
+            
+            // Header column should remain unchanged
+            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+
+            // The second Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
+            
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Column_resizing_is_disabled_when_CanUserResizeColumns_is_false()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
