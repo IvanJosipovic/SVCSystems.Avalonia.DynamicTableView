@@ -78,6 +78,23 @@ columns[0].CellMaxLines = 3;
 ```
 
 These options affect cells without a custom `CellTemplate`; custom templates control their own text. Use a `Star` or `Pixel` column width to constrain text so it can wrap; `Auto` columns size to their content.
+- Column definitions are mutable while the table is attached. `Header`, `CellTemplate`, the cell text options, `IsSearchable`, `CanUserSort`, `CanUserFilter`, `WidthMode`, `Width`, `MinWidth`, `FilterChoices`, and `FilterFlyoutFactory` update attached tables and headers. Make those changes on the UI thread. The table observes the definitions in its current `Source`; a definition with no attached table keeps its metadata and applies it on attach.
+- Disabling `CanUserSort` or `CanUserFilter` immediately removes that column's active sort or filter, including a `SetCustomFilter` predicate. Other columns' sort, filter, and search state are kept, and re-enabling does not restore the removed state.
+- A column definition can be shared by more than one source. Each source subscribes independently and stops observing the definition when it is removed from that source or disposed.
+- Manual column sizing is tracked per table, not per definition. Dragging a divider or restoring a pixel width suppresses `Auto`, `Cells`, and `Header` sizing for that key only in that table; setting `Width`, `WidthMode`, or `MinWidth` releases the suppression. Because the width itself lives on the shared definition, two tables showing the same column converge on the dragged width while keeping independent suppression.
+- `MinWidth` can also be set from a style, so a theme can own the minimum instead of every definition repeating it. Add a class to the column definition, then target the native `TableViewColumn`:
+
+```xml
+<Style Selector="TableViewColumn.narrow">
+  <Setter Property="dyn:DynamicTableViewColumnProperties.MinWidth" Value="120" />
+</Style>
+```
+
+```csharp
+column.Classes.Add("narrow");
+```
+
+`DynamicTableViewColumn.Classes` is copied to the native column before it attaches, so styles apply normally. A styled minimum takes precedence over `DynamicTableViewColumn.MinWidth`; when no style sets one, the metadata value is used. Changing the styled value updates an attached table.
 - Filter flyouts are 280 px wide by default. Override per table:
 
 ```xml
