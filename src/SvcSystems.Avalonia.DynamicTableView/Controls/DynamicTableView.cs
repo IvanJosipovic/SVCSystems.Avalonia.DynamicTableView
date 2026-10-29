@@ -397,7 +397,7 @@ public sealed partial class DynamicTableView : TableView
             header.UpdateState(
                 sorts,
                 filters,
-                CanUserResizeColumns && columnIndex >= 0 && columnIndex + 1 < Source.Columns.Count);
+                CanUserResizeColumns && columnIndex >= 0);
         }
         if (_resizeHeadersDirty)
             RefreshResizeHeaders();
@@ -411,7 +411,7 @@ public sealed partial class DynamicTableView : TableView
             header.UpdateState(
                 Source.SortDescriptors,
                 Source.FilterDescriptors,
-                CanUserResizeColumns && columnIndex >= 0 && columnIndex + 1 < Source.Columns.Count);
+                CanUserResizeColumns && columnIndex >= 0);
         }
     }
 
@@ -425,10 +425,10 @@ public sealed partial class DynamicTableView : TableView
             return;
 
         int resizeIndex = IndexOfColumn(Source.Columns, headerKey);
-        if (resizeIndex <= 0)
+        if (resizeIndex < 0)
             return;
 
-        DynamicTableViewColumn definition = Source.Columns[resizeIndex - 1];
+        DynamicTableViewColumn definition = Source.Columns[resizeIndex];
         if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
             return;
 
@@ -437,7 +437,7 @@ public sealed partial class DynamicTableView : TableView
             : native.ActualWidth;
         double newWidth = Math.Max(definition.MinWidth, currentWidth + deltaX);
         List<(DynamicTableViewColumn Definition, TableViewColumn Native, double Width)> precedingStars = [];
-        for (int index = 0; index < resizeIndex - 1; index++)
+        for (int index = 0; index < resizeIndex; index++)
         {
             DynamicTableViewColumn preceding = Source.Columns[index];
             if (preceding.WidthMode != DynamicTableViewWidthMode.Star ||
@@ -809,7 +809,8 @@ public sealed partial class DynamicTableView : TableView
         if (TryGetResizeColumnAtDivider(position, out string? resizeColumnKey, out bool isRightHalf))
         {
             int columnIndex = IndexOfColumn(Source!.Columns, resizeColumnKey!);
-            string hoveredKey = isRightHalf ? resizeColumnKey! : Source.Columns[columnIndex - 1].Key;
+            string hoveredKey = isRightHalf && columnIndex + 1 < Source.Columns.Count
+                ? Source.Columns[columnIndex + 1].Key : resizeColumnKey!;
             nextHoverHeader = FindResizeHeader(hoveredKey);
         }
         SetResizeHoverHeader(nextHoverHeader);
@@ -862,7 +863,7 @@ public sealed partial class DynamicTableView : TableView
             if (header.Column?.Header is not DynamicTableViewColumn definition)
                 continue;
             int columnIndex = IndexOfColumn(Source!.Columns, definition.Key);
-            if (columnIndex < 0 || columnIndex + 1 >= Source.Columns.Count || !grip.IsVisible)
+            if (columnIndex < 0 || !grip.IsVisible)
                 continue;
 
             // Get the grip's actual position in the table's coordinate system
@@ -885,7 +886,7 @@ public sealed partial class DynamicTableView : TableView
                 position.Y > gripOrigin.Y + grip.Bounds.Height + hitTestTolerance)
                 continue;
 
-            columnKey = Source.Columns[columnIndex + 1].Key;
+            columnKey = definition.Key;
             isRightHalf = position.X >= dividerCenter;
             return true;
         }

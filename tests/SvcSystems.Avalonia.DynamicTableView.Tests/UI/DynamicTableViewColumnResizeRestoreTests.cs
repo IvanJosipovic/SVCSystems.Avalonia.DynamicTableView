@@ -176,15 +176,13 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             Assert.False(headersBefore.SequenceEqual(headersAfter));
 
             // Every new header must expose a live resize grip that is connected to the table.
-            // The last column has no right neighbour, so its grip stays hidden by design.
             foreach (TableViewColumnHeader header in headersAfter)
             {
                 Thumb grip = Assert.Single(header.GetVisualDescendants().OfType<Thumb>(),
                     thumb => thumb.Name == "PART_ColumnResizeGrip");
                 Assert.NotNull(grip.TranslatePoint(default, table));
 
-                bool isLastColumn = ReferenceEquals(header.Column, table.Columns[^1]);
-                Assert.Equal(!isLastColumn, grip.IsVisible);
+                Assert.True(grip.IsVisible);
             }
 
             // The table must still recognise the divider of the rebuilt headers, which is what

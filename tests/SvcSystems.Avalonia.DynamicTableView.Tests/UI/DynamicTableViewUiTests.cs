@@ -465,7 +465,7 @@ public sealed class DynamicTableViewUiTests
                 ReferenceEquals(candidate.Column, table.Columns[^1]));
             var lastColumnGrip = Assert.Single(lastColumnHeader.GetVisualDescendants().OfType<Thumb>(),
                 thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
-            Assert.False(lastColumnGrip.IsVisible);
+            Assert.True(lastColumnGrip.IsVisible);
             Assert.Equal(new Thickness(0, 0, -6, 0), resizer.Margin);
             Assert.Equal(12, resizer.Bounds.Width);
             Assert.Equal(0, resizer.Bounds.Y);

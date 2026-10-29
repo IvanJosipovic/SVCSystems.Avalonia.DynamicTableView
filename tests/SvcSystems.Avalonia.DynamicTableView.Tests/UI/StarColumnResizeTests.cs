@@ -24,7 +24,7 @@ public sealed class StarColumnResizeTests
         ];
         for (int tabIndex = 0; tabIndex < 2; tabIndex++)
         {
-            for (int target = 0; target < expectedModes.Length - 1; target++)
+            for (int target = 0; target < expectedModes.Length; target++)
             {
                 using var window = new SvcSystems.Avalonia.DynamicTableView.Sample.MainWindow { Width = 1600 };
                 try
