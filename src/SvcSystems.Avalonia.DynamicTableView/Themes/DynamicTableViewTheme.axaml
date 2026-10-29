@@ -33,6 +33,7 @@
                 <StackPanel Orientation="Horizontal"
                             Margin="0"
                             VerticalAlignment="Center"
+                            AutomationProperties.Name="{TemplateBinding SortAccessibleText}"
                             IsVisible="{TemplateBinding HasSort}">
                   <PathIcon Data="{StaticResource DynamicTableView.SortAscendingGeometry}"
                             Width="{DynamicResource DynamicTableView.HeaderIconSize}"

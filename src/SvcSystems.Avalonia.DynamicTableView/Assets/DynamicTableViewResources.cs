@@ -39,6 +39,12 @@ public static class DynamicTableViewResources
     /// <summary>Gets accessible text for sort.</summary>
     public static string SortAccessibleName => GetString(nameof(SortAccessibleName));
 
+    /// <summary>Gets accessible text for a column sorted ascending.</summary>
+    public static string SortAscendingAccessibleName => GetString(nameof(SortAscendingAccessibleName));
+
+    /// <summary>Gets accessible text for a column sorted descending.</summary>
+    public static string SortDescendingAccessibleName => GetString(nameof(SortDescendingAccessibleName));
+
     /// <summary>Gets the false value label.</summary>
     public static string FilterFalse => GetString(nameof(FilterFalse));
 

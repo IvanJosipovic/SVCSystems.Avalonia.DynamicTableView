@@ -19,6 +19,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     private readonly Subject<string> _searchChanges = new();
     private readonly BehaviorSubject<Func<T, bool>> _filterSubject = new(static _ => true);
     private readonly BehaviorSubject<IComparer<T>> _sortSubject = new(Comparer<T>.Create(static (_, _) => 0));
+    private readonly HashSet<DynamicTableViewColumn> _observedColumns = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, DynamicTableViewFilterDescriptor> _filters = new(StringComparer.Ordinal);
     private IReadOnlyList<DynamicTableViewFilterDescriptor> _filterDescriptors = Array.AsReadOnly(Array.Empty<DynamicTableViewFilterDescriptor>());
     private readonly Dictionary<string, Func<T, bool>> _customFilters = new(StringComparer.Ordinal);
@@ -76,6 +77,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         }
 
         Columns.CollectionChanged += ColumnsOnCollectionChanged;
+        SynchronizeColumnSubscriptions();
         _searchSubscription = _searchChanges
             .Select(query => _searchDebounce == TimeSpan.Zero || string.IsNullOrWhiteSpace(query)
                 ? Observable.Return(query)
@@ -224,6 +226,9 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
             return;
         _disposed = true;
         Columns.CollectionChanged -= ColumnsOnCollectionChanged;
+        foreach (DynamicTableViewColumn column in _observedColumns)
+            UnsubscribeColumn(column);
+        _observedColumns.Clear();
         _searchSubscription.Dispose();
         _pipelineSubscription.Dispose();
         _searchChanges.Dispose();
@@ -234,6 +239,56 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
 
     private void ColumnsOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        SynchronizeColumnSubscriptions();
+        UpdateFilterPredicate();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void SynchronizeColumnSubscriptions()
+    {
+        foreach (DynamicTableViewColumn column in _observedColumns.ToArray())
+        {
+            if (Columns.Contains(column)) continue;
+            UnsubscribeColumn(column);
+            _observedColumns.Remove(column);
+        }
+        foreach (DynamicTableViewColumn column in Columns)
+        {
+            if (!_observedColumns.Add(column)) continue;
+            column.SearchabilityChanged += ColumnOnSearchabilityChanged;
+            column.SortCapabilityChanged += ColumnOnSortCapabilityChanged;
+            column.FilterCapabilityChanged += ColumnOnFilterCapabilityChanged;
+        }
+    }
+
+    private void UnsubscribeColumn(DynamicTableViewColumn column)
+    {
+        column.SearchabilityChanged -= ColumnOnSearchabilityChanged;
+        column.SortCapabilityChanged -= ColumnOnSortCapabilityChanged;
+        column.FilterCapabilityChanged -= ColumnOnFilterCapabilityChanged;
+    }
+
+    private void ColumnOnSearchabilityChanged(object? sender, EventArgs e)
+    {
+        UpdateFilterPredicate();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ColumnOnSortCapabilityChanged(object? sender, EventArgs e)
+    {
+        DynamicTableViewColumn column = (DynamicTableViewColumn)sender!;
+        if (!column.CanUserSort && _sortDescriptors.Any(sort => sort.ColumnKey == column.Key))
+            SetSort(_sortDescriptors.Where(sort => sort.ColumnKey != column.Key).ToArray());
+    }
+
+    private void ColumnOnFilterCapabilityChanged(object? sender, EventArgs e)
+    {
+        DynamicTableViewColumn column = (DynamicTableViewColumn)sender!;
+        if (column.CanUserFilter) return;
+        bool changed = _filters.Remove(column.Key);
+        changed |= _customFilters.Remove(column.Key);
+        if (!changed) return;
+        _filterDescriptors = Array.AsReadOnly(_filters.Values.ToArray());
         UpdateFilterPredicate();
         Changed?.Invoke(this, EventArgs.Empty);
     }

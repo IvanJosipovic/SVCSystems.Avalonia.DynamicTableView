@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
@@ -265,6 +266,69 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Changing_cell_template_updates_realized_cells_and_restores_default()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewTestRow row = DynamicTableViewTestData.CreateRows()[0];
+        cache.AddOrUpdate(row);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static item => item.Name, static item => $"Display: {item.Name}");
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            ContentControl cell = table.GetVisualDescendants().OfType<ContentControl>()
+                .Single(control => Equals(ToolTip.GetTip(control), $"Display: {row.Name}"));
+            Assert.Equal($"Display: {row.Name}", cell.Content);
+            column.CellTemplate = new FuncDataTemplate<DynamicTableViewTestRow>(
+                static (item, _) => new TextBlock { Text = $"Template: {item?.Name}" }, supportsRecycling: true);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(row, cell.Content);
+            Assert.Contains(cell.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == $"Template: {row.Name}");
+            column.CellTemplate = null;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal($"Display: {row.Name}", cell.Content);
+            Assert.Contains(cell.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == $"Display: {row.Name}");
+            Assert.Equal($"Display: {row.Name}", ToolTip.GetTip(cell));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Template_change_while_detached_is_used_after_reattachment()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewTestRow row = DynamicTableViewTestData.CreateRows()[0];
+        cache.AddOrUpdate(row);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            window.Content = null;
+            Dispatcher.UIThread.RunJobs();
+            column.CellTemplate = new FuncDataTemplate<DynamicTableViewTestRow>(
+                static (item, _) => new TextBlock { Text = $"Reattached: {item?.Name}" }, supportsRecycling: true);
+            window.Content = table;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains(table.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == $"Reattached: {row.Name}");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Custom_cell_template_receives_row_and_preserves_display_tooltip()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -296,6 +360,263 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal($"Template: {row.Name}", templatedText.Text);
             Assert.Equal($"Fallback: {row.Name}", fallbackCell.Content);
             Assert.Equal($"Fallback: {row.Name}", ToolTip.GetTip(fallbackCell));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Changing_column_capabilities_updates_header_and_clears_query()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            TableViewColumnHeader header = Assert.Single(table.GetVisualDescendants().OfType<TableViewColumnHeader>());
+            Point click = header.TranslatePoint(new Point(20, header.Bounds.Height / 2), window)!.Value;
+            source.SetSort([new("name", ListSortDirection.Ascending)]);
+            source.SetFilter(new("name", DynamicTableViewFilterOperator.Equals, "Alpha"));
+            column.CanUserSort = false;
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.SortDescriptors);
+            Assert.Empty(source.FilterDescriptors);
+            Assert.False(filter.IsVisible);
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Assert.Empty(source.SortDescriptors);
+            column.CanUserSort = true;
+            column.CanUserFilter = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(filter.IsVisible);
+            Assert.NotNull(FlyoutBase.GetAttachedFlyout(filter));
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Assert.Single(source.SortDescriptors);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Disabling_filter_capability_hides_an_open_flyout_and_its_filter()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            source.SetFilter(new("name", DynamicTableViewFilterOperator.Equals, "Alpha"));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(flyout.IsOpen);
+            Assert.Single(source.FilterDescriptors);
+
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(flyout.IsOpen);
+            Assert.Null(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.False(filter.IsVisible);
+            Assert.Empty(source.FilterDescriptors);
+
+            column.CanUserFilter = true;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filter.IsVisible);
+            Assert.NotNull(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.Empty(source.FilterDescriptors);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Column_capabilities_changed_while_detached_apply_after_reattachment()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            source.SetSort([new("name", ListSortDirection.Ascending)]);
+
+            window.Content = null;
+            Dispatcher.UIThread.RunJobs();
+            column.CanUserSort = false;
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.SortDescriptors);
+
+            window.Content = table;
+            Dispatcher.UIThread.RunJobs();
+
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            TableViewColumnHeader header = Assert.Single(table.GetVisualDescendants().OfType<TableViewColumnHeader>());
+            Point click = header.TranslatePoint(new Point(20, header.Bounds.Height / 2), window)!.Value;
+            Assert.False(filter.IsVisible);
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.SortDescriptors);
+
+            column.CanUserSort = true;
+            column.CanUserFilter = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(filter.IsVisible);
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Single(source.SortDescriptors);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Changing_filter_choices_rebuilds_the_next_flyout_and_keeps_active_filter()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        column.FilterChoices = [new("Alpha", "Alpha")];
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var first = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            var firstContent = Assert.IsAssignableFrom<Control>(first.Content);
+            ComboBox firstChoiceBox = Assert.Single(firstContent.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_ChoiceBox"));
+            Assert.Single(firstChoiceBox.ItemsSource!.Cast<DynamicTableViewFilterChoice>());
+            source.SetFilter(new("name", DynamicTableViewFilterOperator.Equals, "Alpha"));
+            Dispatcher.UIThread.RunJobs();
+
+            column.FilterChoices = [new("Alpha", "Alpha"), new("Beta", "Beta")];
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(first.IsOpen);
+            var second = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.NotSame(first, second);
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            var secondContent = Assert.IsAssignableFrom<Control>(second.Content);
+            ComboBox secondChoiceBox = Assert.Single(secondContent.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_ChoiceBox"));
+            Assert.Equal(2, secondChoiceBox.ItemsSource!.Cast<DynamicTableViewFilterChoice>().Count());
+            Assert.Equal("Alpha", Assert.Single(source.FilterDescriptors).Value);
+            Assert.Contains("filtered", GetHeaderControl(table, 0).Classes);
+            second.Hide();
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Changing_filter_factory_rebuilds_the_next_custom_flyout()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        column.FilterFlyoutFactory = static _ => new Border();
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var first = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.IsType<Border>(first.Content);
+            first.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            column.FilterFlyoutFactory = static _ => new TextBlock { Text = "Custom" };
+            Dispatcher.UIThread.RunJobs();
+
+            var second = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.NotSame(first, second);
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal("Custom", Assert.IsType<TextBlock>(second.Content).Text);
+            second.Hide();
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Sort_state_is_exposed_to_automation_and_cleared_when_unsorted()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Control header = GetHeaderControl(table, 0);
+            StackPanel indicator = Assert.Single(header.GetVisualDescendants().OfType<StackPanel>(),
+                panel => panel.Children.OfType<PathIcon>().Any());
+            Assert.Equal(string.Empty, AutomationProperties.GetName(indicator));
+
+            source.SetSort([new("name", ListSortDirection.Ascending)]);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(indicator.IsVisible);
+            Assert.Equal(DynamicTableViewResources.SortAscendingAccessibleName, AutomationProperties.GetName(indicator));
+
+            source.SetSort([new("name", ListSortDirection.Descending)]);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(DynamicTableViewResources.SortDescendingAccessibleName, AutomationProperties.GetName(indicator));
+
+            source.SetSort([]);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(indicator.IsVisible);
+            Assert.Equal(string.Empty, AutomationProperties.GetName(indicator));
         }
         finally
         {
@@ -988,6 +1309,59 @@ public sealed class DynamicTableViewUiTests
 
             Assert.True(table.Columns[0].ActualWidth > firstWidthWithBothVisible + 100);
             Assert.False(table.Columns[1].IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Leaving_the_table_clears_the_resize_hover_state()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var leftHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizer = Assert.Single(leftHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            Point divider = resizer.TranslatePoint(
+                new Point(resizer.Bounds.Width / 2, resizer.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Resize grip has no window position.");
+
+            IPointer? pointer = null;
+            table.AddHandler(
+                InputElement.PointerMovedEvent,
+                (_, args) => pointer ??= args.Pointer,
+                RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
+                handledEventsToo: true);
+            window.MouseMove(new Point(divider.X - 3, divider.Y));
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(leftHeader.Classes.Contains("dynamic-table-view-resize-pointerover"));
+            Assert.NotNull(pointer);
+
+            // PointerExited is a Direct routed event, so raising it on the table reaches the
+            // table's own handler but would never reach a Bubble subscription.
+            table.RaiseEvent(new PointerEventArgs(
+                InputElement.PointerExitedEvent,
+                table,
+                pointer,
+                null,
+                default,
+                0,
+                new PointerPointProperties(),
+                KeyModifiers.None));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(leftHeader.Classes.Contains("dynamic-table-view-resize-pointerover"));
+            Assert.Null(leftHeader.Cursor);
         }
         finally
         {
