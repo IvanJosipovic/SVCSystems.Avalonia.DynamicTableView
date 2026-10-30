@@ -115,6 +115,38 @@ public sealed class DynamicTableViewColumnLayoutTests
     }
 
     [AvaloniaFact]
+    public void Header_mode_column_shrinks_when_the_header_label_gets_shorter()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "A deliberately very wide header label", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Header;
+        column.MinWidth = 40;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 600, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            double wide = table.Columns[0].Width.Value;
+
+            // Header mode tracks the label, so a shorter label must shrink the column.
+            column.Header = "Id";
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].Width.Value < wide,
+                $"Expected the column to shrink below {wide} but it was {table.Columns[0].Width.Value}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Metadata_minimum_still_applies_when_no_style_sets_one()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -186,6 +218,44 @@ public sealed class DynamicTableViewColumnLayoutTests
             Assert.True(table.Columns[0].Width.Value > 100);
         }
         finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Invalid_saved_width_rejects_the_restore_before_anything_changes()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Pixel;
+        first.Width = 100;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "age", "Age", static row => row.Age);
+        second.WidthMode = DynamicTableViewWidthMode.Pixel;
+        second.Width = 100;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 600, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // The reorder would happen before the invalid width is written, so a restore that only
+            // validated during the write loop would leave the columns moved but not resized.
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => table.RestoreState(new DynamicTableViewState([new("age", 0, double.NaN)], [], [])));
+
+            Assert.Equal("name", source.Columns[0].Key);
+            Assert.Equal("age", source.Columns[1].Key);
+            Assert.Equal(100, table.Columns[0].Width.Value);
+            Assert.Equal(100, table.Columns[1].Width.Value);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [AvaloniaFact]

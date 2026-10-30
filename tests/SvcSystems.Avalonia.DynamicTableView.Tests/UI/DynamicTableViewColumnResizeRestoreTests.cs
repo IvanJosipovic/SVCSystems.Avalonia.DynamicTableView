@@ -584,7 +584,7 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
     }
 
     [AvaloniaFact]
-    public void Header_change_restores_auto_sizing_in_every_table_sharing_the_definition()
+    public void Header_change_remeasures_in_every_table_sharing_the_definition()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
@@ -612,17 +612,15 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
 
-            // Table A restores a manual width, which suppresses auto sizing for that key in A only.
-            firstTable.RestoreState(new DynamicTableViewState([new("name", 0, 260)], [], []));
-            Dispatcher.UIThread.RunJobs();
-            Assert.Equal(260, firstTable.Columns[0].Width.Value);
+            double firstBefore = firstTable.Columns[0].Width.Value;
+            double secondBefore = secondTable.Columns[0].Width.Value;
 
-            // A metadata change clears the suppression in both tables, so both re-measure.
+            // A shared definition's header change must re-measure both tables that show it.
             name.Header = "A considerably wider header label";
             Dispatcher.UIThread.RunJobs();
 
-            Assert.True(firstTable.Columns[0].Width.Value > 100);
-            Assert.True(secondTable.Columns[0].Width.Value > 100);
+            Assert.True(firstTable.Columns[0].Width.Value > firstBefore);
+            Assert.True(secondTable.Columns[0].Width.Value > secondBefore);
         }
         finally
         {

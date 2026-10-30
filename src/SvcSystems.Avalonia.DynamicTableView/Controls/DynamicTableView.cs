@@ -118,10 +118,13 @@ public sealed partial class DynamicTableView : TableView
     }
 
     /// <summary>Restores column order, sizing modes and widths, sort descriptors, filters, and scroll offset by stable key.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">A saved width is not finite or is negative. The table is left unchanged.</exception>
     public void RestoreState(DynamicTableViewState state)
     {
         ArgumentNullException.ThrowIfNull(state);
         var source = Source ?? throw new InvalidOperationException("DynamicTableView has no source.");
+        // Validate before moving anything, so a rejected state cannot leave a partial restore.
+        DynamicTableViewStateSerializer.Validate(state);
         IReadOnlyList<DynamicTableViewColumnState> ordered =
             DynamicTableViewStateSerializer.PlanColumnOrder(state, source.Columns);
 
@@ -808,7 +811,13 @@ public sealed partial class DynamicTableView : TableView
                 desired = Math.Max(desired, cells);
             desired = Math.Max(GetEffectiveMinWidth(definition, native), desired);
             var currentWidth = native.ActualWidth;
-            if (!double.IsFinite(currentWidth) || desired > currentWidth + 1)
+            // Header mode tracks the header text, so it must be able to shrink when the label gets
+            // shorter. Auto and Cells only ever grow, so the widest realized row is not lost as
+            // rows scroll out of view.
+            bool shouldApply = definition.WidthMode == DynamicTableViewWidthMode.Header
+                ? !double.IsFinite(currentWidth) || Math.Abs(desired - currentWidth) > 1
+                : !double.IsFinite(currentWidth) || desired > currentWidth + 1;
+            if (shouldApply)
                 native.Width = new GridLength(desired);
         }
     }

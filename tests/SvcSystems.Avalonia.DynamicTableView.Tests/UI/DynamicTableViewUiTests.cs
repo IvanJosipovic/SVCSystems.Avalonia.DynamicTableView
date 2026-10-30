@@ -409,6 +409,44 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Disabling_sort_capability_keeps_an_open_filter_flyout()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(flyout.IsOpen);
+
+            // A sort capability change must not touch the filter flyout: closing it would discard
+            // an unapplied filter edit the user is in the middle of typing.
+            column.CanUserSort = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(flyout.IsOpen);
+            Assert.Same(flyout, FlyoutBase.GetAttachedFlyout(filter));
+
+            // The filter capability change must still close it.
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(flyout.IsOpen);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
     public void Disabling_filter_capability_hides_an_open_flyout_and_its_filter()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

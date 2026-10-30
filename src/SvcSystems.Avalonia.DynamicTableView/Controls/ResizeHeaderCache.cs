@@ -81,10 +81,18 @@ internal sealed class ResizeHeaderCache
     }
 
     /// <summary>Finds the divider under <paramref name="position"/>, in the root's coordinate space.</summary>
+    /// <remarks>
+    /// Every candidate whose hit band contains the point is considered and the nearest divider
+    /// wins. Two adjacent grips can overlap when a column is narrower than its grip, so returning
+    /// the first match would resize whichever column happened to be cached first.
+    /// </remarks>
     public DividerHit HitTest(Point position)
     {
         RefreshIfDirty();
         _stale = false;
+
+        DividerHit best = default;
+        double bestDistance = double.PositiveInfinity;
 
         for (var index = 0; index < _entries.Count; index++)
         {
@@ -107,18 +115,24 @@ internal sealed class ResizeHeaderCache
             if (halfGripWidth <= 0)
                 continue;
 
-            // The divider center is at the center of the grip.
+            // The divider center is at the center of the grip. The lower bound is checked
+            // without tolerance so a pointer below the header cannot start a resize.
             double dividerCenter = gripOrigin.X + halfGripWidth;
-            if (Math.Abs(position.X - dividerCenter) > halfGripWidth + HitTestTolerance ||
-                position.Y < gripOrigin.Y - HitTestTolerance ||
+            double distance = Math.Abs(position.X - dividerCenter);
+            if (distance > halfGripWidth + HitTestTolerance ||
+                position.Y < gripOrigin.Y ||
                 position.Y > gripOrigin.Y + grip.Bounds.Height + HitTestTolerance)
             {
                 continue;
             }
 
-            return new DividerHit(definition.Key, position.X >= dividerCenter);
+            if (distance >= bestDistance)
+                continue;
+
+            bestDistance = distance;
+            best = new DividerHit(definition.Key, position.X >= dividerCenter);
         }
 
-        return default;
+        return best;
     }
 }

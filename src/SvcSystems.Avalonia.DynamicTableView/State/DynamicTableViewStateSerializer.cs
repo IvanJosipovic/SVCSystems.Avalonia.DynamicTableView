@@ -37,6 +37,32 @@ internal static class DynamicTableViewStateSerializer
     }
 
     /// <summary>
+    /// Validates every saved width and Star weight before a restore mutates anything.
+    /// </summary>
+    /// <remarks>
+    /// Restoring moves columns before it writes widths, so a width rejected part-way through the
+    /// write loop would leave the table reordered but not resized. Validating up front keeps a
+    /// failed restore from leaving a partial result.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A saved width is not finite or is negative.</exception>
+    public static void Validate(DynamicTableViewState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        for (var index = 0; index < state.Columns.Count; index++)
+        {
+            DynamicTableViewColumnState saved = state.Columns[index];
+            if (!double.IsFinite(saved.Width) || saved.Width < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(state),
+                    saved.Width,
+                    $"Column '{saved.Key}' has an invalid width. The width must be a finite, non-negative number.");
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets the saved columns that still exist in <paramref name="currentColumns"/>, in their saved order.
     /// Columns that are not present are dropped so a restore never targets a column the source no longer has.
     /// </summary>

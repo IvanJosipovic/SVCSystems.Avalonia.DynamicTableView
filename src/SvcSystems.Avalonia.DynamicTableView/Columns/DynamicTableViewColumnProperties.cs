@@ -22,7 +22,12 @@ namespace SvcSystems.Avalonia.DynamicTableView;
 /// </remarks>
 public static class DynamicTableViewColumnProperties
 {
-    /// <summary>Defines the styleable minimum width for a column.</summary>
+    /// <summary>Defines the styleable minimum width for a column. Defaults to NaN, meaning unset.</summary>
+    /// <remarks>
+    /// Registered by hand rather than with <c>GenerateAttachedProperty</c>: the generator emits
+    /// <c>AvaloniaProperty.RegisterAttached&lt;Owner, Host, T&gt;</c>, which requires a non-static
+    /// owner type, so it cannot host an attached property on a static class.
+    /// </remarks>
     public static readonly AttachedProperty<double> MinWidthProperty =
         AvaloniaProperty.RegisterAttached<TableViewColumn, double>(
             "MinWidth",

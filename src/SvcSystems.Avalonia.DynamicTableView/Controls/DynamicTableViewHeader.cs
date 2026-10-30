@@ -67,7 +67,7 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     {
         base.OnAttachedToVisualTree(e);
         Column.HeaderChanged += ColumnOnHeaderChanged;
-        Column.SortCapabilityChanged += ColumnOnCapabilitiesChanged;
+        Column.SortCapabilityChanged += ColumnOnSortCapabilityChanged;
         Column.FilterCapabilityChanged += ColumnOnCapabilitiesChanged;
         Column.FilterConfigurationChanged += ColumnOnCapabilitiesChanged;
         UpdateCapabilities();
@@ -77,7 +77,7 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         Column.HeaderChanged -= ColumnOnHeaderChanged;
-        Column.SortCapabilityChanged -= ColumnOnCapabilitiesChanged;
+        Column.SortCapabilityChanged -= ColumnOnSortCapabilityChanged;
         Column.FilterCapabilityChanged -= ColumnOnCapabilitiesChanged;
         Column.FilterConfigurationChanged -= ColumnOnCapabilitiesChanged;
         base.OnDetachedFromVisualTree(e);
@@ -102,6 +102,17 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     }
 
     private void ColumnOnCapabilitiesChanged(object? sender, EventArgs e) => UpdateCapabilities();
+
+    /// <summary>
+    /// Updates only sort state. A sort-capability change must not touch the filter flyout, because
+    /// closing it would discard an unapplied filter edit.
+    /// </summary>
+    private void ColumnOnSortCapabilityChanged(object? sender, EventArgs e)
+    {
+        IsSortEnabled = Column.CanUserSort;
+        if (!IsSortEnabled)
+            _sortPointerDown = false;
+    }
 
     private void UpdateCapabilities()
     {

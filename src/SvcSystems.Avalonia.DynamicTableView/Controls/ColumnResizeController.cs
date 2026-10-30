@@ -64,6 +64,11 @@ internal sealed class ColumnResizeController
         if (!_canResize())
             return false;
 
+        // A second press while a gesture is active must not replace the column being resized
+        // or fall through to header reorder and selection handling.
+        if (IsResizing)
+            return false;
+
         DividerHit hit = HitTest(position);
         if (hit.Key is null)
             return false;
