@@ -769,7 +769,12 @@ public sealed partial class DynamicTableView : TableView
     {
         if (Source is null || VisualRoot is null)
             return;
+
+        // Only the widest realized cell in a column can raise its width, so the running maximum
+        // for the pass is the only state needed. It is rebuilt per pass because the realized cell
+        // set changes as rows scroll.
         _cellSamples.Clear();
+
         foreach (var cell in this.GetVisualDescendants().OfType<TableViewCell>())
         {
             if (cell.Column?.Header is not DynamicTableViewColumn definition || cell.DataContext is not { } row)
@@ -777,6 +782,14 @@ public sealed partial class DynamicTableView : TableView
             if (definition.WidthMode is not (DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) ||
                 _manuallySizedColumns.Contains(definition.Key))
                 continue;
+
+            // A cell that already fits the column cannot raise it, so measuring it is wasted work.
+            // The text measurer lays the string out, which is the dominant cost of this pass, and
+            // this skips it for every cell narrower than the widest one already measured.
+            double available = cell.Bounds.Width - ColumnWidthCalculator.MeasuredTextPadding;
+            if (available > 0 && _cellSamples.TryGetValue(definition.Key, out var known) && known <= available)
+                continue;
+
             var measured = _textMeasurer.Measure(definition.GetDisplayValue(row)) + ColumnWidthCalculator.MeasuredTextPadding;
             if (!_cellSamples.TryGetValue(definition.Key, out var current) || measured > current)
                 _cellSamples[definition.Key] = measured;

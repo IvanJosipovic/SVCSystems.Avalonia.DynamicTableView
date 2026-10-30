@@ -143,6 +143,20 @@ Allocation is unchanged, which is the claim the extraction had to preserve: the 
 
 The pass now compares a key of its three real inputs — the width budget left after fixed columns take their realized width, the column count, and a revision bumped by width-metadata and collection changes — and skips the redistribution and writes when the key is unchanged. Measured on the shrinking-viewport test: 18 layout passes produced 8 recomputes, one per actual viewport change.
 
+### Auto-width: skipping measurement for cells that already fit
+
+The auto-width pass measured every realized cell on every pass. Only the widest cell in a column can raise that column's width, so a cell that already fits the current column width cannot contribute and is now skipped before the text measurer runs. The text measurer lays the string out, which is the dominant cost, so the skip removes most of the work rather than a constant.
+
+Measured with `AutoWidthAfterSourceUpdate`, ShortRun, same machine and runtime as the recorded baseline:
+
+| Rows | Before | After | Allocated before | Allocated after |
+|------|--------|-------|------------------|-----------------|
+| 100 | 34.75 ms | 19.39 ms | 4.92 MB | 2.43 MB |
+| 1,000 | 40.48 ms | 22.09 ms | 4.92 MB | 2.43 MB |
+| 10,000 | 34.71 ms | 16.89 ms | 4.92 MB | 2.43 MB |
+
+A cached cell-sample table was implemented first and **measured worse** (22.79 ms at 10,000 rows). Retaining a maximum across passes means a stale, too-large sample makes the fit test fail for every cell, so all of them are measured anyway, and the cache adds its own lookups. It was removed. The lesson recorded here is that the per-pass maximum is the only state this pass needs.
+
 Avalonia cannot enforce this itself. `TableViewLayoutHelper.UpdateActualWidths` distributes the star budget purely proportionally with no minimum awareness, so two star columns with a minimum above their share both render below it. The redistribution is therefore required, and the minimum cannot be delegated to the platform.
 
 ### Star layout: removing the below-minimum flash
