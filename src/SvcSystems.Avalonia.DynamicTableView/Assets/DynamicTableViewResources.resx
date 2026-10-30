@@ -13,6 +13,8 @@
   <data name="FilterClear" xml:space="preserve"><value>Clear</value></data>
   <data name="FilterAccessibleName" xml:space="preserve"><value>Filter options</value></data>
   <data name="SortAccessibleName" xml:space="preserve"><value>Sort column</value></data>
+  <data name="SortAscendingAccessibleName" xml:space="preserve"><value>Sorted ascending</value></data>
+  <data name="SortDescendingAccessibleName" xml:space="preserve"><value>Sorted descending</value></data>
   <data name="FilterFalse" xml:space="preserve"><value>False</value></data>
   <data name="FilterTrue" xml:space="preserve"><value>True</value></data>
   <data name="FilterOperator_Contains" xml:space="preserve"><value>Contains</value></data>

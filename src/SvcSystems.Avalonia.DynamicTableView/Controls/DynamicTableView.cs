@@ -40,13 +40,20 @@ public sealed partial class DynamicTableView : TableView
     private readonly Dictionary<string, TableViewColumn> _nativeColumns = new(StringComparer.Ordinal);
     private readonly HashSet<string> _manuallySizedColumns = new(StringComparer.Ordinal);
     private readonly Dictionary<string, double> _cellSamples = new(StringComparer.Ordinal);
-    private readonly TextBlock _textMeasurer = new();
+    private readonly HashSet<DynamicTableViewColumn> _observedWidthColumns = new(ReferenceEqualityComparer.Instance);
+    private bool _applyingWidthMetadata;
+    private readonly TextMeasurer _textMeasurer = new();
     private IReadOnlyList<DynamicTableViewSortDescriptor> _headerSorts = [];
     private IReadOnlyList<DynamicTableViewFilterDescriptor> _headerFilters = [];
     private IDynamicTableViewSource? _attachedSource;
     private bool _autoWidthPassQueued;
-    private bool _starWidthUpdateQueued;
-    private readonly Action _updateStarWidths;
+    private bool _starWidthPassQueued;
+    private bool _columnSizingInvalidated = true;
+    private readonly Action _runStarWidthPass;
+    private GridLength[] _starWidthBuffer = [];
+    private (double Viewport, int Columns, int Revision) _lastStarWidthKey;
+    private int _widthRevision;
+    private bool _applyingStarWidths;
     private ScrollViewer? _scrollViewer;
     private bool _headerRefreshQueued;
     private bool _restoringState;
@@ -54,13 +61,9 @@ public sealed partial class DynamicTableView : TableView
     private bool _applyingScrollRestore;
     private int _pointerDownColumn = -1;
     private Point _pointerDownPosition;
-    private IPointer? _resizePointer;
-    private string? _resizeColumnKey;
-    private double _resizeLastX;
+    private readonly ResizeHeaderCache _resizeHeaders;
+    private readonly ColumnResizeController _resize;
     private TableViewColumnHeader? _resizeHoverHeader;
-    private readonly List<(TableViewColumnHeader Header, Thumb Grip)> _resizeHeaders = [];
-    private bool _resizeHeadersDirty = true;
-    private bool _resizeHeadersStale;
     private bool _headerDragStarted;
     private int _selectionDragAnchor = -1;
     private int _selectionDragLast = -1;
@@ -71,7 +74,15 @@ public sealed partial class DynamicTableView : TableView
     /// <summary>Creates an empty dynamic table.</summary>
     public DynamicTableView()
     {
-        _updateStarWidths = UpdateStarColumnMinimumWidths;
+        _runStarWidthPass = FlushStarColumnWidths;
+        _resizeHeaders = new ResizeHeaderCache(this, IsKnownColumnKey);
+        _resize = new ColumnResizeController(
+            () => CanUserResizeColumns && Source is not null,
+            _resizeHeaders,
+            ResolveResizeHoverKey,
+            SetResizeHoverHeader);
+        _resize.ResizeRequested += OnResizeRequested;
+        _resize.IsResizingChanged += (_, isResizing) => Classes.Set(ColumnResizingClass, isResizing);
         Classes.Add("dynamic-table-view");
         UpdateGridLinesClass();
         AutoScrollToSelectedItem = false;
@@ -80,8 +91,10 @@ public sealed partial class DynamicTableView : TableView
         AddHandler(InputElement.PointerPressedEvent, OnGridPointerPressed, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(InputElement.PointerMovedEvent, OnGridPointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(InputElement.PointerReleasedEvent, OnGridPointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
-        AddHandler(InputElement.PointerCaptureLostEvent, OnGridPointerCaptureLost, RoutingStrategies.Bubble, handledEventsToo: true);
-        AddHandler(InputElement.PointerExitedEvent, OnGridPointerExited, RoutingStrategies.Bubble, handledEventsToo: true);
+        // PointerCaptureLost and PointerExited are Direct routed events, so a Bubble
+        // subscription would never be invoked.
+        AddHandler(InputElement.PointerCaptureLostEvent, OnGridPointerCaptureLost, RoutingStrategies.Direct, handledEventsToo: true);
+        AddHandler(InputElement.PointerExitedEvent, OnGridPointerExited, RoutingStrategies.Direct, handledEventsToo: true);
         AddHandler(ScrollViewer.ScrollChangedEvent, OnScrollChanged, RoutingStrategies.Bubble);
     }
 
@@ -97,38 +110,28 @@ public sealed partial class DynamicTableView : TableView
     public DynamicTableViewState CaptureState()
     {
         var source = Source ?? throw new InvalidOperationException("DynamicTableView has no source.");
-        var columns = new List<DynamicTableViewColumnState>(source.Columns.Count);
-        for (var i = 0; i < source.Columns.Count; i++)
-        {
-            var definition = source.Columns[i];
-            var widthMode = definition.WidthMode;
-            var width = definition.Width;
-            if (widthMode != DynamicTableViewWidthMode.Star && _nativeColumns.TryGetValue(definition.Key, out var native))
-            {
-                var actualWidth = native.ActualWidth;
-                if (double.IsFinite(actualWidth) && actualWidth > 0)
-                    width = actualWidth;
-            }
-            columns.Add(new(definition.Key, i, width, widthMode));
-        }
+        IReadOnlyList<DynamicTableViewColumnState> columns = DynamicTableViewStateSerializer.CaptureColumns(
+            source.Columns,
+            key => _nativeColumns.TryGetValue(key, out TableViewColumn? native) ? native.ActualWidth : 0);
         var scrollOffset = _pendingScrollOffset ?? FindScrollViewer()?.Offset ?? default;
         return new(columns, source.SortDescriptors.ToArray(), source.FilterDescriptors.ToArray(), scrollOffset);
     }
 
     /// <summary>Restores column order, sizing modes and widths, sort descriptors, filters, and scroll offset by stable key.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">A saved width is not finite or is negative. The table is left unchanged.</exception>
     public void RestoreState(DynamicTableViewState state)
     {
         ArgumentNullException.ThrowIfNull(state);
         var source = Source ?? throw new InvalidOperationException("DynamicTableView has no source.");
-        var ordered = state.Columns
-            .Where(saved => source.Columns.Any(column => string.Equals(column.Key, saved.Key, StringComparison.Ordinal)))
-            .OrderBy(static saved => saved.Order)
-            .ToArray();
+        // Validate before moving anything, so a rejected state cannot leave a partial restore.
+        DynamicTableViewStateSerializer.Validate(state);
+        IReadOnlyList<DynamicTableViewColumnState> ordered =
+            DynamicTableViewStateSerializer.PlanColumnOrder(state, source.Columns);
 
         _restoringState = true;
         try
         {
-            for (var targetIndex = 0; targetIndex < ordered.Length; targetIndex++)
+            for (var targetIndex = 0; targetIndex < ordered.Count; targetIndex++)
             {
                 var currentIndex = IndexOfColumn(source.Columns, ordered[targetIndex].Key);
                 if (currentIndex < 0 || currentIndex == targetIndex)
@@ -146,10 +149,11 @@ public sealed partial class DynamicTableView : TableView
             var definition = FindDefinition(saved.Key);
             if (definition is null)
                 continue;
-            definition.WidthMode = saved.WidthMode;
-            definition.Width = saved.WidthMode == DynamicTableViewWidthMode.Pixel
-                ? Math.Max(definition.MinWidth, saved.Width)
-                : saved.Width;
+            double restoredWidth = DynamicTableViewStateSerializer.ResolveRestoredWidth(
+                saved,
+                definition,
+                _nativeColumns.TryGetValue(definition.Key, out TableViewColumn? restoredNative) ? restoredNative : null);
+            SetColumnWidthMetadata(definition, saved.WidthMode, restoredWidth);
             if (saved.WidthMode == DynamicTableViewWidthMode.Pixel)
                 _manuallySizedColumns.Add(saved.Key);
             else
@@ -190,9 +194,12 @@ public sealed partial class DynamicTableView : TableView
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
+        SynchronizeWidthOptionsSubscriptions();
+        // Metadata can change while detached, when there is no attached table to notify.
+        ApplyWidthMetadataToNativeColumns();
         LayoutUpdated += OnLayoutUpdated;
-        QueueStarColumnMinimumWidthUpdate();
+        InvalidateColumnSizing();
         QueueHeaderRefresh();
         QueueAutoWidthPass();
         QueueScrollRestore();
@@ -201,7 +208,8 @@ public sealed partial class DynamicTableView : TableView
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         LayoutUpdated -= OnLayoutUpdated;
-        _resizeHeadersDirty = true;
+        ClearWidthOptionsSubscriptions();
+        _resizeHeaders.Invalidate();
         _resizeHeaders.Clear();
         _scrollViewer = null;
         base.OnDetachedFromVisualTree(e);
@@ -211,12 +219,12 @@ public sealed partial class DynamicTableView : TableView
     {
         _scrollViewer = null;
         base.OnApplyTemplate(e);
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
     }
 
     private void AttachSource(IDynamicTableViewSource? source)
     {
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
         if (_attachedSource is not null)
         {
             _attachedSource.Changed -= SourceOnChanged;
@@ -224,6 +232,7 @@ public sealed partial class DynamicTableView : TableView
         }
 
         _attachedSource = source;
+        _manuallySizedColumns.Clear();
         _headerSorts = [];
         _headerFilters = [];
         if (source is null)
@@ -231,7 +240,10 @@ public sealed partial class DynamicTableView : TableView
             ItemsSource = null;
             Selection = null;
             Columns.Clear();
+            foreach (TableViewColumn discarded in _nativeColumns.Values)
+                discarded.PropertyChanged -= NativeColumnOnPropertyChanged;
             _nativeColumns.Clear();
+            SynchronizeWidthOptionsSubscriptions();
             return;
         }
 
@@ -239,7 +251,87 @@ public sealed partial class DynamicTableView : TableView
         Selection = source.SelectionModel;
         source.Changed += SourceOnChanged;
         source.Columns.CollectionChanged += ColumnsOnCollectionChanged;
+        SynchronizeWidthOptionsSubscriptions();
         RebuildNativeColumns();
+    }
+
+    /// <summary>Observes column sizing metadata for the attached source, so attached tables follow runtime changes.</summary>
+    private void SynchronizeWidthOptionsSubscriptions()
+    {
+        foreach (DynamicTableViewColumn column in _observedWidthColumns.ToArray())
+        {
+            if (IsWidthObservedColumn(column))
+                continue;
+            column.WidthOptionsChanged -= ColumnOnWidthOptionsChanged;
+            _observedWidthColumns.Remove(column);
+        }
+
+        if (Source is null)
+            return;
+
+        foreach (DynamicTableViewColumn column in Source.Columns)
+        {
+            if (!IsWidthObservedColumn(column) || !_observedWidthColumns.Add(column))
+                continue;
+            column.WidthOptionsChanged += ColumnOnWidthOptionsChanged;
+        }
+    }
+
+    private bool IsWidthObservedColumn(DynamicTableViewColumn column)
+        => VisualRoot is not null && Source is { } source && source.Columns.Contains(column);
+
+    private void ClearWidthOptionsSubscriptions()
+    {
+        foreach (DynamicTableViewColumn column in _observedWidthColumns)
+            column.WidthOptionsChanged -= ColumnOnWidthOptionsChanged;
+        _observedWidthColumns.Clear();
+    }
+
+    private void ColumnOnWidthOptionsChanged(object? sender, EventArgs e)
+    {
+        if (sender is not DynamicTableViewColumn definition || _applyingWidthMetadata)
+            return;
+        ApplyWidthMetadata(definition);
+        InvalidateColumnSizing();
+        FlushColumnSizing();
+        QueueAutoWidthPass();
+    }
+
+    /// <summary>Re-applies every observed column's width metadata, including metadata changed while detached.</summary>
+    private void ApplyWidthMetadataToNativeColumns()
+    {
+        if (Source is null)
+            return;
+        foreach (var definition in Source.Columns)
+            ApplyWidthMetadata(definition);
+    }
+
+    /// <summary>Applies one column's width metadata to its native column, overriding any captured manual width.</summary>
+    private void ApplyWidthMetadata(DynamicTableViewColumn definition)
+    {
+        // An explicit metadata change supersedes any width captured by a resize gesture.
+        _manuallySizedColumns.Remove(definition.Key);
+        _widthRevision++;
+        if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
+            return;
+        GridLength width = GetInitialWidth(definition, GetEffectiveMinWidth(definition, native));
+        if (native.Width != width)
+            native.Width = width;
+    }
+
+    /// <summary>Applies width metadata without re-entering the change handler.</summary>
+    private void SetColumnWidthMetadata(DynamicTableViewColumn definition, DynamicTableViewWidthMode widthMode, double width)
+    {
+        _applyingWidthMetadata = true;
+        try
+        {
+            definition.WidthMode = widthMode;
+            definition.Width = width;
+        }
+        finally
+        {
+            _applyingWidthMetadata = false;
+        }
     }
 
     private void UpdateGridLinesClass()
@@ -280,10 +372,12 @@ public sealed partial class DynamicTableView : TableView
     {
         if (_restoringState)
             return;
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
+        _widthRevision++;
 
         if (Source is null || e.Action == NotifyCollectionChangedAction.Reset)
         {
+            _manuallySizedColumns.Clear();
             RebuildNativeColumns();
         }
         else if (e.Action == NotifyCollectionChangedAction.Move)
@@ -299,7 +393,11 @@ public sealed partial class DynamicTableView : TableView
                     var index = e.OldStartingIndex;
                     var column = Columns[index];
                     Columns.RemoveAt(index);
-                    _nativeColumns.Remove(((DynamicTableViewColumn)column.Header!).Key);
+                    string key = ((DynamicTableViewColumn)column.Header!).Key;
+                    if (column is TableViewColumn removed)
+                        removed.PropertyChanged -= NativeColumnOnPropertyChanged;
+                    _nativeColumns.Remove(key);
+                    _manuallySizedColumns.Remove(key);
                 }
             }
             if (e.NewItems is not null)
@@ -314,18 +412,24 @@ public sealed partial class DynamicTableView : TableView
             }
             UpdateHeaderStates();
         }
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
+        SynchronizeWidthOptionsSubscriptions();
+        InvalidateColumnSizing();
         QueueAutoWidthPass();
     }
 
     private void RebuildNativeColumns()
     {
+        _widthRevision++;
+        foreach (TableViewColumn discarded in _nativeColumns.Values)
+            discarded.PropertyChanged -= NativeColumnOnPropertyChanged;
         _nativeColumns.Clear();
         Columns.Clear();
         // Rebuilding the native columns makes Avalonia recreate the column header visuals,
         // so the cached resize grips point at detached headers until the new ones are realized.
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
         _resizeHeaders.Clear();
+        SynchronizeWidthOptionsSubscriptions();
         if (Source is null)
             return;
 
@@ -340,15 +444,61 @@ public sealed partial class DynamicTableView : TableView
     }
 
     private TableViewColumn CreateNativeColumn(DynamicTableViewColumn definition)
-        => new()
+    {
+        var native = new TableViewColumn
         {
             Header = definition,
             HeaderTemplate = CreateHeaderTemplate(),
             CanUserResize = false,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Width = GetInitialWidth(definition),
+            Width = ColumnWidthCalculator.GetInitialWidth(definition, definition.MinWidth),
             CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(this, definition), supportsRecycling: true)
         };
+
+        // Style classes are applied before the column attaches, so styles that target them
+        // (for example to set DynamicTableViewColumnProperties.MinWidth) take effect.
+        foreach (var styleClass in definition.Classes)
+            native.Classes.Add(styleClass);
+        // A style can set the minimum after the initial width was applied, so follow the property.
+        native.PropertyChanged += NativeColumnOnPropertyChanged;
+        return native;
+    }
+
+    /// <summary>Reapplies column sizing when a style or the caller changes a column's width or minimum.</summary>
+    private void NativeColumnOnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (sender is not TableViewColumn { Header: DynamicTableViewColumn definition })
+            return;
+
+        if (e.Property == TableViewColumn.IsVisibleProperty)
+        {
+            _widthRevision++;
+            InvalidateColumnSizing();
+            return;
+        }
+
+        if (e.Property == DynamicTableViewColumnProperties.MinWidthProperty)
+        {
+            // A styled minimum changes the star result directly, so apply it before the next frame.
+            ApplyWidthMetadata(definition);
+            InvalidateColumnSizing();
+            FlushColumnSizing();
+            QueueAutoWidthPass();
+            return;
+        }
+
+        if (e.Property != TableViewColumn.WidthProperty)
+            return;
+
+        // A fixed column's realized width is an input to the star budget. Only an external write
+        // matters; the star pass's own writes are already reflected in the cached key, so ignoring
+        // them here keeps the pass from re-queueing itself every frame.
+        if (_applyingStarWidths)
+            return;
+
+        _widthRevision++;
+        InvalidateColumnSizing();
+    }
 
     private IDataTemplate CreateHeaderTemplate()
         => new FuncDataTemplate<DynamicTableViewColumn>(
@@ -358,7 +508,7 @@ public sealed partial class DynamicTableView : TableView
     {
         if (_headerRefreshQueued || Source is null)
             return;
-        _resizeHeadersDirty = true;
+        _resizeHeaders.Invalidate();
         _headerRefreshQueued = true;
         Dispatcher.UIThread.Post(() =>
         {
@@ -371,17 +521,16 @@ public sealed partial class DynamicTableView : TableView
                     native.HeaderTemplate = CreateHeaderTemplate();
             }
             UpdateHeaderStates();
-            _resizeHeadersDirty = true;
+            _resizeHeaders.Invalidate();
         }, DispatcherPriority.Loaded);
     }
 
-    private static GridLength GetInitialWidth(DynamicTableViewColumn definition)
-        => definition.WidthMode switch
-        {
-            DynamicTableViewWidthMode.Pixel => new GridLength(Math.Max(definition.MinWidth, definition.Width)),
-            DynamicTableViewWidthMode.Star => new GridLength(Math.Max(0.1, definition.Width), GridUnitType.Star),
-            _ => new GridLength(Math.Max(definition.MinWidth, Math.Max(80, definition.Width)))
-        };
+    private static GridLength GetInitialWidth(DynamicTableViewColumn definition, double minWidth)
+        => ColumnWidthCalculator.GetInitialWidth(definition, minWidth);
+
+    /// <summary>Resolves the minimum width, preferring a styled value over the column metadata.</summary>
+    private static double GetEffectiveMinWidth(DynamicTableViewColumn definition, TableViewColumn? native)
+        => ColumnWidthCalculator.GetEffectiveMinWidth(definition, native);
 
     private void UpdateHeaderStates()
     {
@@ -397,10 +546,9 @@ public sealed partial class DynamicTableView : TableView
             header.UpdateState(
                 sorts,
                 filters,
-                CanUserResizeColumns && columnIndex >= 0 && columnIndex + 1 < Source.Columns.Count);
+                CanUserResizeColumns && columnIndex >= 0);
         }
-        if (_resizeHeadersDirty)
-            RefreshResizeHeaders();
+        _resizeHeaders.RefreshIfDirty();
     }
 
     internal void UpdateHeaderState(DynamicTableViewHeader header)
@@ -411,34 +559,41 @@ public sealed partial class DynamicTableView : TableView
             header.UpdateState(
                 Source.SortDescriptors,
                 Source.FilterDescriptors,
-                CanUserResizeColumns && columnIndex >= 0 && columnIndex + 1 < Source.Columns.Count);
+                CanUserResizeColumns && columnIndex >= 0);
         }
     }
 
     /// <summary>Invalidates the cached resize targets when a header template is realized.</summary>
     internal void NotifyHeaderTemplateApplied()
-        => _resizeHeadersDirty = true;
+        => _resizeHeaders.Invalidate();
 
+    /// <summary>Reports whether <paramref name="key"/> still belongs to the attached source.</summary>
+    private bool IsKnownColumnKey(string key)
+        => Source is { } source && IndexOfColumn(source.Columns, key) >= 0;
+
+    /// <summary>Resizes a column by <paramref name="deltaX"/>, clamped to its effective minimum width.</summary>
+    /// <remarks>This is the same operation a divider drag performs.</remarks>
     internal void ResizeColumnAtDivider(string headerKey, double deltaX)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(headerKey);
         if (Source is null || !CanUserResizeColumns || deltaX == 0)
             return;
 
         int resizeIndex = IndexOfColumn(Source.Columns, headerKey);
-        if (resizeIndex <= 0)
+        if (resizeIndex < 0)
             return;
 
-        DynamicTableViewColumn definition = Source.Columns[resizeIndex - 1];
+        DynamicTableViewColumn definition = Source.Columns[resizeIndex];
         if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
             return;
 
         double currentWidth = native.Width.GridUnitType == GridUnitType.Pixel
             ? native.Width.Value
             : native.ActualWidth;
-        double newWidth = Math.Max(definition.MinWidth, currentWidth + deltaX);
+        double newWidth = Math.Max(GetEffectiveMinWidth(definition, native), currentWidth + deltaX);
         _manuallySizedColumns.Add(definition.Key);
-        definition.WidthMode = DynamicTableViewWidthMode.Pixel;
-        definition.Width = newWidth;
+        SetColumnWidthMetadata(definition, DynamicTableViewWidthMode.Pixel, newWidth);
+        _widthRevision++;
         native.Width = new GridLength(newWidth);
     }
 
@@ -447,32 +602,52 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnLayoutUpdated(object? sender, EventArgs e)
     {
-        QueueStarColumnMinimumWidthUpdate();
-        if (_resizeHeadersDirty)
-            RefreshResizeHeaders();
+        FlushColumnSizing();
+        _resizeHeaders.RefreshIfDirty();
         TryRestorePendingScrollOffset();
         QueueAutoWidthPass();
     }
 
-    private void QueueStarColumnMinimumWidthUpdate()
+    /// <summary>Marks the star layout as needing a recompute on the next layout pass.</summary>
+    /// <remarks>
+    /// Every mutation that can change a star width or a minimum must call this. The pass itself is
+    /// coalesced and skipped when its inputs are unchanged, so a scroll frame costs one comparison
+    /// instead of a full redistribution.
+    /// </remarks>
+    private void InvalidateColumnSizing()
     {
-        if (_starWidthUpdateQueued || Source is null || VisualRoot is null)
-            return;
-
-        for (int index = 0; index < Columns.Count; index++)
-        {
-            if (Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star })
-                continue;
-
-            _starWidthUpdateQueued = true;
-            Dispatcher.UIThread.Post(_updateStarWidths, DispatcherPriority.Background);
-            return;
-        }
+        _columnSizingInvalidated = true;
+        QueueColumnSizing();
     }
 
-    private void UpdateStarColumnMinimumWidths()
+    /// <summary>Queues one coalesced star-width pass for the current frame.</summary>
+    private void QueueColumnSizing()
     {
-        _starWidthUpdateQueued = false;
+        if (_starWidthPassQueued || _columnSizingInvalidated is false || Source is null || VisualRoot is null)
+            return;
+
+        _starWidthPassQueued = true;
+        Dispatcher.UIThread.Post(_runStarWidthPass, DispatcherPriority.Render);
+    }
+
+    /// <summary>
+    /// Recomputes every star column width and applies the result in a single write pass.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The result is computed completely before any width is written. Writing as each column is
+    /// resolved would let a column be arranged below its minimum for one frame and then snap back
+    /// to the minimum, which the user sees as a flash.
+    /// </para>
+    /// <para>
+    /// The key comparison happens on every layout pass, because the viewport and the realized
+    /// width of fixed columns are inputs that change without any invalidation call. Only the
+    /// redistribution and the writes are skipped, which is the expensive part.
+    /// </para>
+    /// </remarks>
+    private void FlushStarColumnWidths()
+    {
+        _starWidthPassQueued = false;
         if (Source is null || VisualRoot is null)
             return;
 
@@ -480,63 +655,62 @@ public sealed partial class DynamicTableView : TableView
         if (!double.IsFinite(availableWidth) || availableWidth <= 0)
             return;
 
-        double weight = 0;
-        for (int index = 0; index < Columns.Count; index++)
+        // The star result depends on the budget left after fixed columns take their realized
+        // width, the column composition, and the width metadata revision. Scrolling changes
+        // none of them, so a scroll frame only pays for this comparison.
+        double starBudget = StarColumnWidths.ComputeStarBudget(availableWidth, Columns);
+        var key = (starBudget, Columns.Count, _widthRevision);
+        if (key == _lastStarWidthKey)
         {
-            TableViewColumn native = Columns[index];
-            if (!native.IsVisible)
-                continue;
-            if (native.Header is not DynamicTableViewColumn definition)
-                continue;
-            if (definition.WidthMode == DynamicTableViewWidthMode.Star)
-                weight += Math.Max(0.1, definition.Width);
-            else if (double.IsFinite(native.ActualWidth))
-                availableWidth -= native.ActualWidth;
+            _columnSizingInvalidated = false;
+            return;
         }
 
-        // Reserve minima before distributing the remaining space by star weight.
-        // Each pass removes at least one constrained column, without scratch storage.
-        double unitWidth = weight > 0 ? Math.Max(0, availableWidth) / weight : 0;
-        double previousUnitWidth = double.PositiveInfinity;
-        while (weight > 0)
+        if (_starWidthBuffer.Length < Columns.Count)
+            _starWidthBuffer = new GridLength[Columns.Count];
+
+        StarColumnWidths.ComputeWidths(starBudget, Columns, _starWidthBuffer);
+
+        var changed = false;
+        _applyingStarWidths = true;
+        try
         {
-            bool constrained = false;
-            for (int index = 0; index < Columns.Count; index++)
+            for (var index = 0; index < Columns.Count; index++)
             {
-                if (!Columns[index].IsVisible || Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
+                TableViewColumn native = Columns[index];
+                if (!native.IsVisible || native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star })
                     continue;
-                double columnWeight = Math.Max(0.1, definition.Width);
-                double threshold = definition.MinWidth / columnWeight;
-                if (threshold > unitWidth && threshold <= previousUnitWidth)
-                {
-                    availableWidth -= definition.MinWidth;
-                    weight -= columnWeight;
-                    constrained = true;
-                }
+
+                GridLength width = _starWidthBuffer[index];
+                if (native.Width == width)
+                    continue;
+
+                native.Width = width;
+                changed = true;
             }
-            if (!constrained)
-                break;
-            previousUnitWidth = unitWidth;
-            unitWidth = weight > 0 ? Math.Max(0, availableWidth) / weight : 0;
+        }
+        finally
+        {
+            _applyingStarWidths = false;
         }
 
-        for (int index = 0; index < Columns.Count; index++)
+        _lastStarWidthKey = key;
+        _columnSizingInvalidated = false;
+        if (changed)
         {
-            TableViewColumn native = Columns[index];
-            if (!native.IsVisible || native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
-                continue;
-            GridLength width = Math.Max(0.1, definition.Width) * unitWidth < definition.MinWidth
-                ? new GridLength(definition.MinWidth)
-                : GetInitialWidth(definition);
-            if (native.Width != width)
-                native.Width = width;
+            // The writes above invalidate layout, so the remaining passes run against the
+            // widths that were just applied rather than the stale ones.
+            _resizeHeaders.Invalidate();
         }
     }
+
+    /// <summary>Runs the pending star pass immediately instead of waiting for the next layout pass.</summary>
+    private void FlushColumnSizing() => FlushStarColumnWidths();
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         if (e.OffsetDelta.X != 0)
-            _resizeHeadersDirty = true;
+            _resizeHeaders.Invalidate();
         if (!_applyingScrollRestore && e.OffsetDelta != default)
             _pendingScrollOffset = null;
     }
@@ -576,6 +750,8 @@ public sealed partial class DynamicTableView : TableView
     private ScrollViewer? FindScrollViewer()
         => _scrollViewer ??= this.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
 
+    internal void NotifyColumnHeaderChanged() => QueueAutoWidthPass();
+
     private void QueueAutoWidthPass()
     {
         if (_autoWidthPassQueued || Source is null || VisualRoot is null)
@@ -604,7 +780,12 @@ public sealed partial class DynamicTableView : TableView
     {
         if (Source is null || VisualRoot is null)
             return;
+
+        // Only the widest realized cell in a column can raise its width, so the running maximum
+        // for the pass is the only state needed. It is rebuilt per pass because the realized cell
+        // set changes as rows scroll.
         _cellSamples.Clear();
+
         foreach (var cell in this.GetVisualDescendants().OfType<TableViewCell>())
         {
             if (cell.Column?.Header is not DynamicTableViewColumn definition || cell.DataContext is not { } row)
@@ -612,7 +793,8 @@ public sealed partial class DynamicTableView : TableView
             if (definition.WidthMode is not (DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) ||
                 _manuallySizedColumns.Contains(definition.Key))
                 continue;
-            var measured = MeasureText(definition.GetDisplayValue(row)) + 24;
+
+            var measured = _textMeasurer.Measure(definition.GetDisplayValue(row)) + ColumnWidthCalculator.MeasuredTextPadding;
             if (!_cellSamples.TryGetValue(definition.Key, out var current) || measured > current)
                 _cellSamples[definition.Key] = measured;
         }
@@ -623,22 +805,26 @@ public sealed partial class DynamicTableView : TableView
                 _manuallySizedColumns.Contains(definition.Key) || !_nativeColumns.TryGetValue(definition.Key, out var native))
                 continue;
 
-            var desired = definition.WidthMode == DynamicTableViewWidthMode.Cells ? definition.MinWidth : MeasureText(definition.Header.ToString()) + 24;
+            var desired = definition.WidthMode == DynamicTableViewWidthMode.Cells
+                ? GetEffectiveMinWidth(definition, native)
+                : _textMeasurer.Measure(definition.Header.ToString()) + ColumnWidthCalculator.MeasuredTextPadding;
             if ((definition.WidthMode is DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) && _cellSamples.TryGetValue(definition.Key, out var cells))
                 desired = Math.Max(desired, cells);
-            desired = Math.Max(definition.MinWidth, desired);
+            desired = Math.Max(GetEffectiveMinWidth(definition, native), desired);
             var currentWidth = native.ActualWidth;
-            if (!double.IsFinite(currentWidth) || desired > currentWidth + 1)
+            // Header mode tracks the header text, so it must be able to shrink when the label gets
+            // shorter. Auto and Cells only ever grow, so the widest realized row is not lost as
+            // rows scroll out of view.
+            bool shouldApply = definition.WidthMode == DynamicTableViewWidthMode.Header
+                ? !double.IsFinite(currentWidth) || Math.Abs(desired - currentWidth) > 1
+                : !double.IsFinite(currentWidth) || desired > currentWidth + 1;
+            if (shouldApply)
                 native.Width = new GridLength(desired);
         }
     }
 
-    private double MeasureText(string? text)
-    {
-        _textMeasurer.Text = text ?? string.Empty;
-        _textMeasurer.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return _textMeasurer.DesiredSize.Width;
-    }
+    private void OnResizeRequested(object? sender, ColumnResizeRequestedEventArgs e)
+        => ResizeColumnAtDivider(e.ColumnKey, e.DeltaX);
 
     private void OnGridPointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -652,14 +838,10 @@ public sealed partial class DynamicTableView : TableView
             return;
 
         Point pressPosition = e.GetPosition(this);
-        if (TryGetResizeColumnAtDivider(pressPosition, out string? resizeColumnKey, out _))
+        if (_resize.TryBegin(pressPosition, e.Pointer, out _))
         {
-            _resizePointer = e.Pointer;
-            _resizeColumnKey = resizeColumnKey;
-            _resizeLastX = pressPosition.X;
             _pointerDownColumn = -1;
             _headerDragStarted = false;
-            Classes.Set(ColumnResizingClass, true);
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -706,18 +888,15 @@ public sealed partial class DynamicTableView : TableView
     {
         UpdateFilterButtonPointerHeader(e.Source);
 
-        if (ReferenceEquals(_resizePointer, e.Pointer) && _resizeColumnKey is { } resizeColumnKey)
+        if (_resize.TryMove(e.Pointer, e.GetPosition(this)))
         {
-            double currentX = e.GetPosition(this).X;
-            ResizeColumnAtDivider(resizeColumnKey, currentX - _resizeLastX);
-            _resizeLastX = currentX;
             e.Handled = true;
             return;
         }
 
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed is false)
         {
-            UpdateResizePointerOver(e.GetPosition(this));
+            _resize.UpdateHover(e.GetPosition(this));
             return;
         }
 
@@ -753,14 +932,11 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnGridPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (ReferenceEquals(_resizePointer, e.Pointer))
+        if (_resize.TryEnd(e.Pointer))
         {
-            _resizePointer = null;
-            _resizeColumnKey = null;
-            Classes.Set(ColumnResizingClass, false);
             e.Pointer.Capture(null);
             e.Handled = true;
-            UpdateResizePointerOver(e.GetPosition(this));
+            _resize.UpdateHover(e.GetPosition(this));
         }
         _pointerDownColumn = -1;
         _headerDragStarted = false;
@@ -770,139 +946,34 @@ public sealed partial class DynamicTableView : TableView
     }
 
     private void OnGridPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
-    {
-        if (!ReferenceEquals(_resizePointer, e.Pointer))
-            return;
-
-        _resizePointer = null;
-        _resizeColumnKey = null;
-        Classes.Set(ColumnResizingClass, false);
-    }
+        => _resize.Cancel();
 
     private void OnGridPointerExited(object? sender, PointerEventArgs e)
-    {
-        if (_resizePointer is null)
-            SetResizeHoverHeader(null);
-    }
+        => _resize.ClearHoverWhenIdle();
 
-    private void UpdateResizePointerOver(Point position)
+    /// <summary>Maps a divider hit to the header that should show the resize hover highlight.</summary>
+    private string? ResolveResizeHoverKey(string columnKey, bool isRightHalf)
     {
-        TableViewColumnHeader? nextHoverHeader = null;
-        if (TryGetResizeColumnAtDivider(position, out string? resizeColumnKey, out bool isRightHalf))
-        {
-            int columnIndex = IndexOfColumn(Source!.Columns, resizeColumnKey!);
-            string hoveredKey = isRightHalf ? resizeColumnKey! : Source.Columns[columnIndex - 1].Key;
-            nextHoverHeader = FindResizeHeader(hoveredKey);
-        }
-        SetResizeHoverHeader(nextHoverHeader);
+        if (Source is null)
+            return null;
+        if (!isRightHalf)
+            return columnKey;
+
+        int columnIndex = IndexOfColumn(Source.Columns, columnKey);
+        return columnIndex >= 0 && columnIndex + 1 < Source.Columns.Count
+            ? Source.Columns[columnIndex + 1].Key
+            : columnKey;
     }
 
     private void SetResizeHoverHeader(TableViewColumnHeader? header)
     {
-        if (ReferenceEquals(_resizeHoverHeader, header))
-            return;
+        // ColumnResizeController already suppresses repeat calls for the same header,
+        // so this only has to move the class off the previous header and onto the next.
+        if (_resizeHoverHeader is not null && !ReferenceEquals(_resizeHoverHeader, header))
+            _resizeHoverHeader.Classes.Set(ResizePointerOverClass, false);
 
-        _resizeHoverHeader?.Classes.Set(ResizePointerOverClass, false);
         _resizeHoverHeader = header;
-        _resizeHoverHeader?.Classes.Set(ResizePointerOverClass, true);
-    }
-
-    private bool TryGetResizeColumnAtDivider(Point position, out string? columnKey, out bool isRightHalf)
-    {
-        columnKey = null;
-        isRightHalf = false;
-        if (!CanUserResizeColumns || Source is null)
-            return false;
-        if (_resizeHeadersDirty)
-            RefreshResizeHeaders();
-
-        if (TryHitTestDivider(position, out columnKey, out isRightHalf))
-            return true;
-
-        // The cached headers can go stale when Avalonia recreates the column header visuals,
-        // for example after the native columns are rebuilt. Refresh once and retry so the
-        // resize gesture keeps working against the live headers.
-        if (_resizeHeadersStale)
-        {
-            RefreshResizeHeaders();
-            return TryHitTestDivider(position, out columnKey, out isRightHalf);
-        }
-
-        return false;
-    }
-
-    private bool TryHitTestDivider(Point position, out string? columnKey, out bool isRightHalf)
-    {
-        columnKey = null;
-        isRightHalf = false;
-        _resizeHeadersStale = false;
-
-        double halfGripWidth = 0;
-        for (int i = 0; i < _resizeHeaders.Count; i++)
-        {
-            (TableViewColumnHeader header, Thumb grip) = _resizeHeaders[i];
-            if (grip.Bounds.Width <= 0)
-                continue;
-
-            halfGripWidth = grip.Bounds.Width / 2;
-            break;
-        }
-        if (halfGripWidth <= 0)
-            return false;
-
-        const double hitTestTolerance = 0.1;
-        for (int i = 0; i < _resizeHeaders.Count; i++)
-        {
-            (TableViewColumnHeader header, Thumb grip) = _resizeHeaders[i];
-            if (header.Column?.Header is not DynamicTableViewColumn definition ||
-                IndexOfColumn(Source.Columns, definition.Key) <= 0)
-                continue;
-
-            if (header.TranslatePoint(default, this) is not { } origin)
-            {
-                // The header is no longer part of the visual tree, so the cache is stale.
-                _resizeHeadersStale = true;
-                continue;
-            }
-
-            double dividerCenter = origin.X - grip.Margin.Right - halfGripWidth;
-            if (Math.Abs(position.X - dividerCenter) > halfGripWidth + hitTestTolerance ||
-                position.Y < origin.Y - hitTestTolerance ||
-                position.Y > origin.Y + header.Bounds.Height + hitTestTolerance)
-                continue;
-
-            columnKey = definition.Key;
-            isRightHalf = position.X >= dividerCenter;
-            return true;
-        }
-
-        return false;
-    }
-
-    private TableViewColumnHeader? FindResizeHeader(string key)
-    {
-        for (int i = 0; i < _resizeHeaders.Count; i++)
-        {
-            TableViewColumnHeader header = _resizeHeaders[i].Header;
-            if (header.Column?.Header is DynamicTableViewColumn definition &&
-                string.Equals(definition.Key, key, StringComparison.Ordinal))
-                return header;
-        }
-
-        return null;
-    }
-
-    private void RefreshResizeHeaders()
-    {
-        _resizeHeadersDirty = false;
-        _resizeHeaders.Clear();
-        foreach (TableViewColumnHeader header in this.GetVisualDescendants().OfType<TableViewColumnHeader>())
-        {
-            Thumb? grip = header.GetVisualDescendants().OfType<Thumb>()
-                .FirstOrDefault(static candidate => candidate.Name == "PART_ColumnResizeGrip");
-            if (grip is not null)
-                _resizeHeaders.Add((header, grip));
-        }
+        header?.Classes.Set(ResizePointerOverClass, true);
     }
 
     private int GetRowIndex(TableViewRow row) => IndexFromContainer(row);

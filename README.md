@@ -4,7 +4,15 @@
 [![NuGet downloads](https://img.shields.io/nuget/dt/SvcSystems.Avalonia.DynamicTableView.svg?style=flat-square)](https://www.nuget.org/packages/SvcSystems.Avalonia.DynamicTableView)
 [![codecov](https://codecov.io/gh/IvanJosipovic/SVCSystems.Avalonia.DynamicTableView/graph/badge.svg)](https://codecov.io/gh/IvanJosipovic/SVCSystems.Avalonia.DynamicTableView)
 
-A read-only Avalonia table driven by DynamicData. Define columns with typed selectors; row members need no reflection metadata.
+A read-only Avalonia table backed by DynamicData, with typed column selectors and virtualized rows.
+
+## Features
+
+- Sort, filter, search, resize, and reorder columns.
+- Choose automatic, header, cell, pixel, or proportional star column sizing.
+- Preserve selection and capture or restore column layout, filters, sorting, and scroll position.
+- Customize cell templates, text wrapping, grid lines, and column minimum widths.
+- Use typed selectors without reflection-based row discovery.
 
 ## Install
 
@@ -12,9 +20,7 @@ A read-only Avalonia table driven by DynamicData. Define columns with typed sele
 dotnet add package SvcSystems.Avalonia.DynamicTableView
 ```
 
-## Setup
-
-Include the theme after Avalonia Fluent. Put application overrides after the include. The compiled XAML include supports trim-enabled apps.
+Add the theme after `FluentTheme` in `App.axaml`:
 
 ```xml
 <Application.Styles>
@@ -23,12 +29,11 @@ Include the theme after Avalonia Fluent. Put application overrides after the inc
 </Application.Styles>
 ```
 
-## Usage
+## Quick Start
 
-Create a `DynamicTableViewSource` from an `IObservableCache<T,TKey>` and typed columns, then set it as the table's `Source`:
+Create a cache, define columns, and assign the source to a table:
 
 ```csharp
-using Avalonia.Controls;
 using DynamicData;
 using SvcSystems.Avalonia.DynamicTableView;
 
@@ -52,65 +57,58 @@ var table = new DynamicTableView { Source = source };
 public sealed record Person(string Id, string Name, int Age);
 ```
 
-Update rows through the cache (`AddOrUpdate`, `RemoveKey`, or `Edit`). The caller owns and disposes both the cache and source. Use the cache's key selector for stable selection and sorting. Filtering and sorting run on a worker scheduler; row updates and selection restoration run on the UI scheduler.
+Add the table to your view and update rows through the cache with `AddOrUpdate`, `RemoveKey`, or `Edit`. Dispose the source and cache when they are no longer needed.
 
-`SetSort` takes ownership of its descriptor array. Pass a new array for later changes; `SortDescriptors` is read-only.
+## Customize
 
-## Options
-
-- `GridLinesVisibility` defaults to `None`; set it to `Horizontal`, `Vertical`, or `All`. Line color follows Fluent's `TableViewColumnHeaderSeparatorBackground` resource.
-- Default text cells expose table-wide defaults: `CellTextWrapping` (`NoWrap`), `CellTextTrimming` (none), and `CellMaxLines` (one line). For example:
+Configure column sizing and table appearance in code:
 
 ```csharp
-var table = new DynamicTableView
-{
-    CellTextWrapping = TextWrapping.Wrap,
-    CellTextTrimming = TextTrimming.CharacterEllipsis,
-    CellMaxLines = 3
-};
-```
+using Avalonia.Media;
 
-Each column can override these settings with its nullable `CellTextWrapping`, `CellTextTrimming`, and `CellMaxLines` properties. Null inherits the table setting; `CellMaxLines = 0` means unlimited. For example:
-
-```csharp
+columns[0].WidthMode = DynamicTableViewWidthMode.Star;
+columns[0].MinWidth = 120;
 columns[0].CellTextWrapping = TextWrapping.Wrap;
-columns[0].CellMaxLines = 3;
+
+table.GridLinesVisibility = DynamicTableViewGridLinesVisibility.All;
+table.CellMaxLines = 3;
 ```
 
-These options affect cells without a custom `CellTemplate`; custom templates control their own text. Use a `Star` or `Pixel` column width to constrain text so it can wrap; `Auto` columns size to their content.
-- Filter flyouts are 280 px wide by default. Override per table:
+Column text options override table defaults for cells without a custom `CellTemplate`. Use `CellMaxLines = 0` for unlimited lines.
+
+To set a minimum width from a style, assign a class before the column is added to the table:
+
+```csharp
+columns[0].Classes.Add("wide-column");
+var source = new DynamicTableViewSource<Person, string>(
+    people, static person => person.Id, columns);
+var table = new DynamicTableView { Source = source };
+```
+
+Apply the class before assigning `Source`; the table copies column classes when it creates its native columns.
 
 ```xml
-<DynamicTableView xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <DynamicTableView.Resources>
-    <x:Double x:Key="DynamicTableView.FilterFlyoutWidth">360</x:Double>
-  </DynamicTableView.Resources>
-</DynamicTableView>
+<Style xmlns:dyn="using:SvcSystems.Avalonia.DynamicTableView"
+       Selector="TableViewColumn.wide-column">
+  <Setter Property="dyn:DynamicTableViewColumnProperties.MinWidth" Value="120" />
+</Style>
 ```
 
-The table does not assign actions to Enter, Delete, taps, or double-taps. Add `KeyBinding`s or handle `Tapped` and `DoubleTapped` in the application.
+The styled minimum takes precedence over the column's `MinWidth`; without one, the column value is used.
 
-## Sample and benchmarks
+## Save And Restore
 
-Run the sample:
+```csharp
+var state = table.CaptureState();
+table.RestoreState(state);
+```
+
+Keyboard shortcuts and tap actions are application-owned: use Avalonia `KeyBindings`, `Tapped`, or `DoubleTapped` to add them.
+
+## Sample
+
+Explore XAML-first and code-first examples in the [sample project](samples/SvcSystems.Avalonia.DynamicTableView.Sample/README.md):
 
 ```bash
 dotnet run --project samples/SvcSystems.Avalonia.DynamicTableView.Sample
-```
-
-Run input benchmarks in Release mode:
-
-```bash
-dotnet run -c Release --project benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks -- --filter '*DynamicTableViewInputBenchmarks*' --inProcess
-```
-
-The library, tests, and benchmarks target .NET 11. BenchmarkDotNet 0.15.8 does not recognize this runtime in its default out-of-process toolchain; use `--inProcess` with this SDK.
-
-Run each headless UI case in a separate invocation so Avalonia is initialized once on its owning thread. For example:
-
-```bash
-for rows in 100 1000 10000; do
-  dotnet run -c Release --project benchmarks/SvcSystems.Avalonia.DynamicTableView.Benchmarks -- \
-    --filter "*ResizeStarColumns*$rows)" --inProcess --warmupCount 2 --iterationCount 5
-done
 ```

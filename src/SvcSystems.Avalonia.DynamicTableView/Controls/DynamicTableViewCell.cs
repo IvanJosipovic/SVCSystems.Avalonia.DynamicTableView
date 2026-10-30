@@ -7,21 +7,14 @@ internal sealed partial class DynamicTableViewCell : ContentControl
     private readonly DynamicTableView _table;
     private readonly DynamicTableViewColumn _column;
     private TextBlock? _defaultTextBlock;
+    private IDataTemplate? _appliedColumnTemplate;
     private INotifyPropertyChanged? _observedItem;
 
     public DynamicTableViewCell(DynamicTableView table, DynamicTableViewColumn column)
     {
         _table = table ?? throw new ArgumentNullException(nameof(table));
         _column = column ?? throw new ArgumentNullException(nameof(column));
-        ContentTemplate = column.CellTemplate ?? new FuncDataTemplate<string>(
-            (text, _) =>
-            {
-                TextBlock textBlock = new() { Text = text };
-                _defaultTextBlock = textBlock;
-                ApplyDefaultTextOptions();
-                return textBlock;
-            },
-            supportsRecycling: true);
+        ApplyCellTemplate();
         Classes.Add("dynamic-table-view-cell");
         DataContextChanged += OnDataContextChanged;
     }
@@ -32,6 +25,9 @@ internal sealed partial class DynamicTableViewCell : ContentControl
     {
         base.OnAttachedToVisualTree(e);
         _column.CellTextOptionsChanged += ColumnOnCellTextOptionsChanged;
+        _column.CellTemplateChanged += ColumnOnCellTemplateChanged;
+        if (!ReferenceEquals(_appliedColumnTemplate, _column.CellTemplate))
+            ApplyCellTemplate();
         UpdateObservedItem();
         UpdateText();
         UpdateDefaultTextOptions();
@@ -41,7 +37,29 @@ internal sealed partial class DynamicTableViewCell : ContentControl
     {
         UnsubscribeFromObservedItem();
         _column.CellTextOptionsChanged -= ColumnOnCellTextOptionsChanged;
+        _column.CellTemplateChanged -= ColumnOnCellTemplateChanged;
         base.OnDetachedFromVisualTree(e);
+    }
+
+    private void ApplyCellTemplate()
+    {
+        _defaultTextBlock = null;
+        _appliedColumnTemplate = _column.CellTemplate;
+        ContentTemplate = _appliedColumnTemplate ?? new FuncDataTemplate<string>(
+            (text, _) =>
+            {
+                TextBlock textBlock = new() { Text = text };
+                _defaultTextBlock = textBlock;
+                ApplyDefaultTextOptions();
+                return textBlock;
+            },
+            supportsRecycling: true);
+    }
+
+    private void ColumnOnCellTemplateChanged(object? sender, EventArgs e)
+    {
+        ApplyCellTemplate();
+        UpdateText();
     }
 
     private void UpdateText()

@@ -57,7 +57,37 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     [GeneratedDirectProperty]
     public partial bool IsResizeEnabled { get; set; }
 
+    /// <summary>Gets accessible text describing the column's current sort state.</summary>
+    [GeneratedDirectProperty]
+    public partial string SortAccessibleText { get; set; } = string.Empty;
+
     protected override Type StyleKeyOverride => typeof(DynamicTableViewHeader);
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Column.HeaderChanged += ColumnOnHeaderChanged;
+        Column.SortCapabilityChanged += ColumnOnSortCapabilityChanged;
+        Column.FilterCapabilityChanged += ColumnOnCapabilitiesChanged;
+        Column.FilterConfigurationChanged += ColumnOnCapabilitiesChanged;
+        UpdateCapabilities();
+        ColumnOnHeaderChanged(this, EventArgs.Empty);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        Column.HeaderChanged -= ColumnOnHeaderChanged;
+        Column.SortCapabilityChanged -= ColumnOnSortCapabilityChanged;
+        Column.FilterCapabilityChanged -= ColumnOnCapabilitiesChanged;
+        Column.FilterConfigurationChanged -= ColumnOnCapabilitiesChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void ColumnOnHeaderChanged(object? sender, EventArgs e)
+    {
+        HeaderText = Column.Header.ToString() ?? string.Empty;
+        _owner.NotifyColumnHeaderChanged();
+    }
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
@@ -65,14 +95,45 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
             _filterButton.Click -= FilterButtonOnClick;
         base.OnApplyTemplate(e);
         _filterButton = e.NameScope.Find<Button>("PART_FilterButton");
-        if (_filterButton is not null && IsFilterEnabled)
+        UpdateCapabilities();
+        // The resize grip lives in this template. Let the table know it is now realized so it
+        // can rebuild its cached resize targets.
+        _owner.NotifyHeaderTemplateApplied();
+    }
+
+    private void ColumnOnCapabilitiesChanged(object? sender, EventArgs e) => UpdateCapabilities();
+
+    /// <summary>
+    /// Updates only sort state. A sort-capability change must not touch the filter flyout, because
+    /// closing it would discard an unapplied filter edit.
+    /// </summary>
+    private void ColumnOnSortCapabilityChanged(object? sender, EventArgs e)
+    {
+        IsSortEnabled = Column.CanUserSort;
+        if (!IsSortEnabled)
+            _sortPointerDown = false;
+    }
+
+    private void UpdateCapabilities()
+    {
+        IsSortEnabled = Column.CanUserSort;
+        if (!IsSortEnabled)
+            _sortPointerDown = false;
+        IsFilterEnabled = Column.CanUserFilter;
+        if (_filterButton is null) return;
+        _filterButton.Click -= FilterButtonOnClick;
+        // A capability or configuration change invalidates the current flyout, so close it
+        // before replacing the attached flyout with a freshly built one.
+        FlyoutBase.GetAttachedFlyout(_filterButton)?.Hide();
+        if (IsFilterEnabled)
         {
             FlyoutBase.SetAttachedFlyout(_filterButton, _owner.MakeFilterFlyout(Column));
             _filterButton.Click += FilterButtonOnClick;
         }
-        // The resize grip lives in this template. Let the table know it is now realized so it
-        // can rebuild its cached resize targets.
-        _owner.NotifyHeaderTemplateApplied();
+        else
+        {
+            FlyoutBase.SetAttachedFlyout(_filterButton, null);
+        }
     }
 
     public void UpdateState(
@@ -98,6 +159,12 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
             : (sortIndex + 1).ToString(CultureInfo.InvariantCulture);
         IsSortAscending = descriptor?.Direction == ListSortDirection.Ascending;
         IsSortDescending = descriptor?.Direction == ListSortDirection.Descending;
+        SortAccessibleText = descriptor?.Direction switch
+        {
+            ListSortDirection.Ascending => DynamicTableViewResources.SortAscendingAccessibleName,
+            ListSortDirection.Descending => DynamicTableViewResources.SortDescendingAccessibleName,
+            _ => string.Empty
+        };
         IsFiltered = filters.Any(filter => string.Equals(filter.ColumnKey, Column.Key, StringComparison.Ordinal));
         Classes.Set("filtered", IsFiltered);
     }

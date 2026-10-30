@@ -17,23 +17,29 @@
       <local:SampleColumnDefinition Key="restarts"
                                     Header="Restarts"
                                     ValueType="{x:Type x:Int32}"
-                                    ValueSelector="{x:Static local:SampleColumnSelectors.Restarts}" />
+                                    ValueSelector="{x:Static local:SampleColumnSelectors.Restarts}"
+                                    WidthMode="Star" />
       <local:SampleColumnDefinition Key="ready"
                                     Header="Ready"
                                     ValueType="{x:Type x:Boolean}"
-                                    ValueSelector="{x:Static local:SampleColumnSelectors.Ready}" />
+                                    ValueSelector="{x:Static local:SampleColumnSelectors.Ready}"
+                                    WidthMode="Header" />
       <local:SampleColumnDefinition Key="cpuCores"
                                     Header="CPU cores"
                                     ValueType="{x:Type x:Decimal}"
-                                    ValueSelector="{x:Static local:SampleColumnSelectors.CpuCores}" />
+                                    ValueSelector="{x:Static local:SampleColumnSelectors.CpuCores}"
+                                    WidthMode="Cells" />
       <local:SampleColumnDefinition Key="memory"
                                     Header="Memory"
                                     ValueType="{x:Type x:Single}"
-                                    ValueSelector="{x:Static local:SampleColumnSelectors.Memory}" />
+                                    ValueSelector="{x:Static local:SampleColumnSelectors.Memory}"
+                                    WidthMode="Pixel"
+                                    Width="120" />
       <local:SampleColumnDefinition Key="createdAt"
                                     Header="Created"
                                     ValueType="{x:Type sys:DateTimeOffset}"
-                                    ValueSelector="{x:Static local:SampleColumnSelectors.CreatedAt}" />
+                                    ValueSelector="{x:Static local:SampleColumnSelectors.CreatedAt}"
+                                    WidthMode="Cells" />
     </local:SampleColumnDefinitions>
   </Window.Resources>
 

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
@@ -265,6 +266,69 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Changing_cell_template_updates_realized_cells_and_restores_default()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewTestRow row = DynamicTableViewTestData.CreateRows()[0];
+        cache.AddOrUpdate(row);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static item => item.Name, static item => $"Display: {item.Name}");
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            ContentControl cell = table.GetVisualDescendants().OfType<ContentControl>()
+                .Single(control => Equals(ToolTip.GetTip(control), $"Display: {row.Name}"));
+            Assert.Equal($"Display: {row.Name}", cell.Content);
+            column.CellTemplate = new FuncDataTemplate<DynamicTableViewTestRow>(
+                static (item, _) => new TextBlock { Text = $"Template: {item?.Name}" }, supportsRecycling: true);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(row, cell.Content);
+            Assert.Contains(cell.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == $"Template: {row.Name}");
+            column.CellTemplate = null;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal($"Display: {row.Name}", cell.Content);
+            Assert.Contains(cell.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == $"Display: {row.Name}");
+            Assert.Equal($"Display: {row.Name}", ToolTip.GetTip(cell));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Template_change_while_detached_is_used_after_reattachment()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewTestRow row = DynamicTableViewTestData.CreateRows()[0];
+        cache.AddOrUpdate(row);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            window.Content = null;
+            Dispatcher.UIThread.RunJobs();
+            column.CellTemplate = new FuncDataTemplate<DynamicTableViewTestRow>(
+                static (item, _) => new TextBlock { Text = $"Reattached: {item?.Name}" }, supportsRecycling: true);
+            window.Content = table;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains(table.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == $"Reattached: {row.Name}");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Custom_cell_template_receives_row_and_preserves_display_tooltip()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -296,6 +360,301 @@ public sealed class DynamicTableViewUiTests
             Assert.Equal($"Template: {row.Name}", templatedText.Text);
             Assert.Equal($"Fallback: {row.Name}", fallbackCell.Content);
             Assert.Equal($"Fallback: {row.Name}", ToolTip.GetTip(fallbackCell));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Changing_column_capabilities_updates_header_and_clears_query()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            TableViewColumnHeader header = Assert.Single(table.GetVisualDescendants().OfType<TableViewColumnHeader>());
+            Point click = header.TranslatePoint(new Point(20, header.Bounds.Height / 2), window)!.Value;
+            source.SetSort([new("name", ListSortDirection.Ascending)]);
+            source.SetFilter(new("name", DynamicTableViewFilterOperator.Equals, "Alpha"));
+            column.CanUserSort = false;
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.SortDescriptors);
+            Assert.Empty(source.FilterDescriptors);
+            Assert.False(filter.IsVisible);
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Assert.Empty(source.SortDescriptors);
+            column.CanUserSort = true;
+            column.CanUserFilter = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(filter.IsVisible);
+            Assert.NotNull(FlyoutBase.GetAttachedFlyout(filter));
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Assert.Single(source.SortDescriptors);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Disabling_sort_capability_keeps_an_open_filter_flyout()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(flyout.IsOpen);
+
+            // A sort capability change must not touch the filter flyout: closing it would discard
+            // an unapplied filter edit the user is in the middle of typing.
+            column.CanUserSort = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(flyout.IsOpen);
+            Assert.Same(flyout, FlyoutBase.GetAttachedFlyout(filter));
+
+            // The filter capability change must still close it.
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(flyout.IsOpen);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Disabling_filter_capability_hides_an_open_flyout_and_its_filter()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            source.SetFilter(new("name", DynamicTableViewFilterOperator.Equals, "Alpha"));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(flyout.IsOpen);
+            Assert.Single(source.FilterDescriptors);
+
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(flyout.IsOpen);
+            Assert.Null(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.False(filter.IsVisible);
+            Assert.Empty(source.FilterDescriptors);
+
+            column.CanUserFilter = true;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(filter.IsVisible);
+            Assert.NotNull(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.Empty(source.FilterDescriptors);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Column_capabilities_changed_while_detached_apply_after_reattachment()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            source.SetSort([new("name", ListSortDirection.Ascending)]);
+
+            window.Content = null;
+            Dispatcher.UIThread.RunJobs();
+            column.CanUserSort = false;
+            column.CanUserFilter = false;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.SortDescriptors);
+
+            window.Content = table;
+            Dispatcher.UIThread.RunJobs();
+
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            TableViewColumnHeader header = Assert.Single(table.GetVisualDescendants().OfType<TableViewColumnHeader>());
+            Point click = header.TranslatePoint(new Point(20, header.Bounds.Height / 2), window)!.Value;
+            Assert.False(filter.IsVisible);
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(source.SortDescriptors);
+
+            column.CanUserSort = true;
+            column.CanUserFilter = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(filter.IsVisible);
+            window.MouseDown(click, MouseButton.Left);
+            window.MouseUp(click, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Single(source.SortDescriptors);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Changing_filter_choices_rebuilds_the_next_flyout_and_keeps_active_filter()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        column.FilterChoices = [new("Alpha", "Alpha")];
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var first = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            var firstContent = Assert.IsAssignableFrom<Control>(first.Content);
+            ComboBox firstChoiceBox = Assert.Single(firstContent.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_ChoiceBox"));
+            Assert.Single(firstChoiceBox.ItemsSource!.Cast<DynamicTableViewFilterChoice>());
+            source.SetFilter(new("name", DynamicTableViewFilterOperator.Equals, "Alpha"));
+            Dispatcher.UIThread.RunJobs();
+
+            column.FilterChoices = [new("Alpha", "Alpha"), new("Beta", "Beta")];
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(first.IsOpen);
+            var second = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.NotSame(first, second);
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            var secondContent = Assert.IsAssignableFrom<Control>(second.Content);
+            ComboBox secondChoiceBox = Assert.Single(secondContent.GetVisualDescendants().OfType<ComboBox>()
+                .Where(static comboBox => comboBox.Name == "PART_ChoiceBox"));
+            Assert.Equal(2, secondChoiceBox.ItemsSource!.Cast<DynamicTableViewFilterChoice>().Count());
+            Assert.Equal("Alpha", Assert.Single(source.FilterDescriptors).Value);
+            Assert.Contains("filtered", GetHeaderControl(table, 0).Classes);
+            second.Hide();
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Changing_filter_factory_rebuilds_the_next_custom_flyout()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        column.FilterFlyoutFactory = static _ => new Border();
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Button filter = Assert.Single(table.GetVisualDescendants().OfType<Button>(), button => button.Classes.Contains("dynamic-table-view-filter-button"));
+            var first = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.IsType<Border>(first.Content);
+            first.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            column.FilterFlyoutFactory = static _ => new TextBlock { Text = "Custom" };
+            Dispatcher.UIThread.RunJobs();
+
+            var second = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(filter));
+            Assert.NotSame(first, second);
+            FlyoutBase.ShowAttachedFlyout(filter);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal("Custom", Assert.IsType<TextBlock>(second.Content).Text);
+            second.Hide();
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Sort_state_is_exposed_to_automation_and_cleared_when_unsorted()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 220;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Control header = GetHeaderControl(table, 0);
+            StackPanel indicator = Assert.Single(header.GetVisualDescendants().OfType<StackPanel>(),
+                panel => panel.Children.OfType<PathIcon>().Any());
+            Assert.Equal(string.Empty, AutomationProperties.GetName(indicator));
+
+            source.SetSort([new("name", ListSortDirection.Ascending)]);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(indicator.IsVisible);
+            Assert.Equal(DynamicTableViewResources.SortAscendingAccessibleName, AutomationProperties.GetName(indicator));
+
+            source.SetSort([new("name", ListSortDirection.Descending)]);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(DynamicTableViewResources.SortDescendingAccessibleName, AutomationProperties.GetName(indicator));
+
+            source.SetSort([]);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(indicator.IsVisible);
+            Assert.Equal(string.Empty, AutomationProperties.GetName(indicator));
         }
         finally
         {
@@ -465,7 +824,7 @@ public sealed class DynamicTableViewUiTests
                 ReferenceEquals(candidate.Column, table.Columns[^1]));
             var lastColumnGrip = Assert.Single(lastColumnHeader.GetVisualDescendants().OfType<Thumb>(),
                 thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
-            Assert.False(lastColumnGrip.IsVisible);
+            Assert.True(lastColumnGrip.IsVisible);
             Assert.Equal(new Thickness(0, 0, -6, 0), resizer.Margin);
             Assert.Equal(12, resizer.Bounds.Width);
             Assert.Equal(0, resizer.Bounds.Y);
@@ -996,6 +1355,59 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Leaving_the_table_clears_the_resize_hover_state()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var leftHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizer = Assert.Single(leftHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+            Point divider = resizer.TranslatePoint(
+                new Point(resizer.Bounds.Width / 2, resizer.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Resize grip has no window position.");
+
+            IPointer? pointer = null;
+            table.AddHandler(
+                InputElement.PointerMovedEvent,
+                (_, args) => pointer ??= args.Pointer,
+                RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
+                handledEventsToo: true);
+            window.MouseMove(new Point(divider.X - 3, divider.Y));
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(leftHeader.Classes.Contains("dynamic-table-view-resize-pointerover"));
+            Assert.NotNull(pointer);
+
+            // PointerExited is a Direct routed event, so raising it on the table reaches the
+            // table's own handler but would never reach a Bubble subscription.
+            table.RaiseEvent(new PointerEventArgs(
+                InputElement.PointerExitedEvent,
+                table,
+                pointer,
+                null,
+                default,
+                0,
+                new PointerPointProperties(),
+                KeyModifiers.None));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(leftHeader.Classes.Contains("dynamic-table-view-resize-pointerover"));
+            Assert.Null(leftHeader.Cursor);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Resize_grip_shows_resize_cursor_when_hovered()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1180,6 +1592,313 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Resizing_second_star_column_when_first_is_also_star_resizes_correct_column()
+    {
+        // Scenario: first two columns are Star, third is Header, fourth is Cells
+        // User resizes the divider between the two Star columns (second Star column)
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> firstStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first-star", "First Star", static row => row.Name);
+        firstStar.WidthMode = DynamicTableViewWidthMode.Star;
+        firstStar.Width = 1;
+        firstStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> secondStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second-star", "Second Star", static row => row.Id);
+        secondStar.WidthMode = DynamicTableViewWidthMode.Star;
+        secondStar.Width = 2;
+        secondStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> headerColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        headerColumn.WidthMode = DynamicTableViewWidthMode.Header;
+        headerColumn.MinWidth = 100;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> cellsColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name);
+        cellsColumn.WidthMode = DynamicTableViewWidthMode.Cells;
+        cellsColumn.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [firstStar, secondStar, headerColumn, cellsColumn]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the second Star column header (index 1)
+            var secondStarHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[1]));
+            var resizeGrip = Assert.Single(secondStarHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            // Click on the LEFT side of the grip (should resize the second Star column)
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y); // Left side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialFirstStarWidth = table.Columns[0].ActualWidth;
+            double initialSecondStarWidth = table.Columns[1].ActualWidth;
+            double initialHeaderWidth = table.Columns[2].ActualWidth;
+            double initialCellsWidth = table.Columns[3].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[1].ActualWidth > initialSecondStarWidth,
+                "Dragging right on the divider between first and second Star should widen the second Star column.");
+            Assert.True(table.Columns[0].ActualWidth < initialFirstStarWidth);
+            
+            // Header and Cells columns should remain unchanged
+            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+            Assert.Equal(initialCellsWidth, table.Columns[3].ActualWidth, precision: 1);
+
+            // The second Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
+            
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_between_star_and_header_resizes_star_column()
+    {
+        // Scenario: first column is Star, second is Header
+        // User resizes the divider between Star and Header
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name);
+        star.WidthMode = DynamicTableViewWidthMode.Star;
+        star.Width = 1;
+        star.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> header = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        header.WidthMode = DynamicTableViewWidthMode.Header;
+        header.MinWidth = 100;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name);
+        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        cells.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [star, header, cells]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the Star column header (index 0) - its grip is the divider between Star and Header
+            var starHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeGrip = Assert.Single(starHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y); // Left side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialStarWidth = table.Columns[0].ActualWidth;
+            double initialHeaderWidth = table.Columns[1].ActualWidth;
+            double initialCellsWidth = table.Columns[2].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            // The Star column (index 0) should widen
+            Assert.True(table.Columns[0].ActualWidth > initialStarWidth,
+                "Dragging right on the divider between Star and Header should widen the Star column.");
+            
+            // Header and Cells columns should remain unchanged
+            Assert.Equal(initialHeaderWidth, table.Columns[1].ActualWidth, precision: 1);
+            Assert.Equal(initialCellsWidth, table.Columns[2].ActualWidth, precision: 1);
+
+            // The Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_between_star_and_cells_resizes_star_column()
+    {
+        // Scenario: first column is Star, second is Cells
+        // User resizes the divider between Star and Cells
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name);
+        star.WidthMode = DynamicTableViewWidthMode.Star;
+        star.Width = 1;
+        star.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "cells", "Cells", static row => row.Name);
+        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        cells.MinWidth = 100;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> header = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        header.WidthMode = DynamicTableViewWidthMode.Header;
+        header.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [star, cells, header]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the Star column header (index 0) - its grip is the divider between Star and Cells
+            var starHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
+            var resizeGrip = Assert.Single(starHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X - 6, dividerCenter.Y); // Left side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialStarWidth = table.Columns[0].ActualWidth;
+            double initialCellsWidth = table.Columns[1].ActualWidth;
+            double initialHeaderWidth = table.Columns[2].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            // The Star column (index 0) should widen
+            Assert.True(table.Columns[0].ActualWidth > initialStarWidth,
+                "Dragging right on the divider between Star and Cells should widen the Star column.");
+            
+            // Cells and Header columns should remain unchanged
+            Assert.Equal(initialCellsWidth, table.Columns[1].ActualWidth, precision: 1);
+            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+
+            // The Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Resizing_second_star_column_right_side_also_resizes_second_star()
+    {
+        // Scenario: first two columns are Star
+        // User clicks on the RIGHT side of the second Star column's grip (should still resize second Star)
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> firstStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first-star", "First Star", static row => row.Name);
+        firstStar.WidthMode = DynamicTableViewWidthMode.Star;
+        firstStar.Width = 1;
+        firstStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> secondStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second-star", "Second Star", static row => row.Id);
+        secondStar.WidthMode = DynamicTableViewWidthMode.Star;
+        secondStar.Width = 2;
+        secondStar.MinWidth = 80;
+
+        DynamicTableViewColumn<DynamicTableViewTestRow> headerColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "header", "Header", static row => row.Name);
+        headerColumn.WidthMode = DynamicTableViewWidthMode.Header;
+        headerColumn.MinWidth = 100;
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, [firstStar, secondStar, headerColumn]);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 800, Height = 320, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Get the second Star column header (index 1)
+            var secondStarHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[1]));
+            var resizeGrip = Assert.Single(secondStarHeader.GetVisualDescendants().OfType<Thumb>(),
+                thumb => thumb.Classes.Contains("dynamic-table-view-column-resize-grip"));
+
+            // Click on the RIGHT side of the grip (should still resize the second Star column)
+            Point dividerCenter = resizeGrip.TranslatePoint(
+                new Point(resizeGrip.Bounds.Width / 2, resizeGrip.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Header has no window position.");
+            Point resizeStart = new(dividerCenter.X + 6, dividerCenter.Y); // Right side of divider
+            Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
+
+            double initialFirstStarWidth = table.Columns[0].ActualWidth;
+            double initialSecondStarWidth = table.Columns[1].ActualWidth;
+            double initialHeaderWidth = table.Columns[2].ActualWidth;
+
+            window.MouseDown(resizeStart, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseMove(resizeEnd, RawInputModifiers.LeftMouseButton);
+            Dispatcher.UIThread.RunJobs();
+            window.MouseUp(resizeEnd, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[1].ActualWidth > initialSecondStarWidth,
+                "Dragging right on the right side of the second Star divider should also widen the second Star column.");
+            Assert.True(table.Columns[0].ActualWidth < initialFirstStarWidth);
+            
+            // Header column should remain unchanged
+            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+
+            // The second Star column should now be in Pixel mode (manually sized)
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
+            
+            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Column_resizing_is_disabled_when_CanUserResizeColumns_is_false()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -1258,6 +1977,38 @@ public sealed class DynamicTableViewUiTests
             Assert.True(table.Columns[0].ActualWidth > initialAutoWidth);
             Assert.True(table.Columns[0].ActualWidth > table.Columns[1].ActualWidth);
             Assert.Equal(123, table.Columns[2].ActualWidth);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Auto_width_measures_longer_text_in_cells_that_fit_the_current_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> automatic = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        automatic.WidthMode = DynamicTableViewWidthMode.Auto;
+        automatic.MinWidth = 30;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [automatic]);
+        DynamicTableViewTestRow[] rows = DynamicTableViewTestData.CreateRows();
+        cache.AddOrUpdate(new[]
+        {
+            rows[0] with { Id = "short", Name = "A" },
+            rows[1] with { Id = "long", Name = new string('W', 60) }
+        });
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 700, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].ActualWidth > 100);
         }
         finally
         {

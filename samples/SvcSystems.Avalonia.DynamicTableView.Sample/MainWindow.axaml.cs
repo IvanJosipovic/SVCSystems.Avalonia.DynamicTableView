@@ -41,14 +41,25 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         var name = DynamicTableViewColumn<SampleRow>.Create("name", "Name", static row => row.Name);
         name.WidthMode = DynamicTableViewWidthMode.Star;
+        var restarts = DynamicTableViewColumn<SampleRow>.Create("restarts", "Restarts", static row => row.Restarts);
+        restarts.WidthMode = DynamicTableViewWidthMode.Star;
+        var ready = DynamicTableViewColumn<SampleRow>.Create("ready", "Ready", static row => row.Ready);
+        ready.WidthMode = DynamicTableViewWidthMode.Header;
+        var cpuCores = DynamicTableViewColumn<SampleRow>.Create("cpuCores", "CPU cores", static row => row.CpuCores);
+        cpuCores.WidthMode = DynamicTableViewWidthMode.Cells;
+        var memory = DynamicTableViewColumn<SampleRow>.Create("memory", "Memory", static row => row.Memory);
+        memory.WidthMode = DynamicTableViewWidthMode.Pixel;
+        memory.Width = 120;
+        var createdAt = DynamicTableViewColumn<SampleRow>.Create("createdAt", "Created", static row => row.CreatedAt);
+        createdAt.WidthMode = DynamicTableViewWidthMode.Cells;
         return
         [
             name,
-            DynamicTableViewColumn<SampleRow>.Create("restarts", "Restarts", static row => row.Restarts),
-            DynamicTableViewColumn<SampleRow>.Create("ready", "Ready", static row => row.Ready),
-            DynamicTableViewColumn<SampleRow>.Create("cpuCores", "CPU cores", static row => row.CpuCores),
-            DynamicTableViewColumn<SampleRow>.Create("memory", "Memory", static row => row.Memory),
-            DynamicTableViewColumn<SampleRow>.Create("createdAt", "Created", static row => row.CreatedAt)
+            restarts,
+            ready,
+            cpuCores,
+            memory,
+            createdAt
         ];
     }
 }

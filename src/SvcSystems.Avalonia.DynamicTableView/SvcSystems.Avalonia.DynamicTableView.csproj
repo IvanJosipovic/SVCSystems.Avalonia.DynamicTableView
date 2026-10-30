@@ -51,6 +51,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The test project exercises internal members (for example ResizeColumnAtDivider) directly
+         instead of widening them to public API. -->
+    <InternalsVisibleTo Include="SvcSystems.Avalonia.DynamicTableView.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 

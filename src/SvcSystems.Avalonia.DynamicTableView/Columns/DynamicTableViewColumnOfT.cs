@@ -7,6 +7,8 @@ public sealed class DynamicTableViewColumn<T> : DynamicTableViewColumn
     private readonly Func<T, string?> _displaySelector;
     private Func<T, T, int>? _typedCompare;
     private Func<DynamicTableViewFilterDescriptor, Func<T, bool>?>? _typedFilter;
+    private Func<DynamicTableViewFilterContext, Control>? _filterFlyoutFactory;
+    private IReadOnlyList<DynamicTableViewFilterChoice> _filterChoices = [];
 
     /// <summary>Creates a text or templated column.</summary>
     /// <param name="key">Stable column key.</param>
@@ -58,11 +60,32 @@ public sealed class DynamicTableViewColumn<T> : DynamicTableViewColumn
         return column;
     }
 
-    /// <summary>Gets or sets a custom filter flyout factory.</summary>
-    public Func<DynamicTableViewFilterContext, Control>? FilterFlyoutFactory { get; set; }
+    /// <summary>Gets or sets a custom filter flyout factory. Changing it takes effect the next time the flyout is opened.</summary>
+    public Func<DynamicTableViewFilterContext, Control>? FilterFlyoutFactory
+    {
+        get => _filterFlyoutFactory;
+        set
+        {
+            if (ReferenceEquals(_filterFlyoutFactory, value))
+                return;
+            _filterFlyoutFactory = value;
+            OnFilterConfigurationChanged();
+        }
+    }
 
-    /// <summary>Gets or sets choices for a standard enum or Boolean filter.</summary>
-    public IReadOnlyList<DynamicTableViewFilterChoice> FilterChoices { get; set; } = [];
+    /// <summary>Gets or sets choices for a standard enum or Boolean filter. Changing it takes effect the next time the flyout is opened.</summary>
+    public IReadOnlyList<DynamicTableViewFilterChoice> FilterChoices
+    {
+        get => _filterChoices;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            if (ReferenceEquals(_filterChoices, value))
+                return;
+            _filterChoices = value;
+            OnFilterConfigurationChanged();
+        }
+    }
 
     /// <summary>Creates an enum column and its trim-safe choices.</summary>
     public static DynamicTableViewColumn<T> CreateEnum<TEnum>(
