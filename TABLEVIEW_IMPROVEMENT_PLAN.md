@@ -137,6 +137,18 @@ Re-measured after the composition extraction moved this path into `ColumnWidthCa
 
 Allocation is unchanged, which is the claim the extraction had to preserve: the star loop still runs without scratch storage and the sizing types add none. The mean moved by 1.4 ms at 100 rows and 1.5 ms at 1,000, both inside the recorded error bars (23.284 ms and 71.763 ms respectively), so the difference is not resolvable with this job. The conclusion supported here is narrow and sufficient: the extraction introduced no measurable regression on the measured path. It does not show an improvement, and it is not evidence about paths without a baseline.
 
+### Star layout: removing the per-frame recompute
+
+`OnLayoutUpdated` ran the star redistribution on every layout pass, which includes every scroll frame. The pass wrote `native.Width`, so it also invalidated layout and could feed another pass. Scrolling cannot change a star width, so the work was wasted; the user-visible symptom was star columns settling after a scroll.
+
+The pass now compares a key of its three real inputs — the width budget left after fixed columns take their realized width, the column count, and a revision bumped by width-metadata and collection changes — and skips the redistribution and writes when the key is unchanged. Measured on the shrinking-viewport test: 18 layout passes produced 8 recomputes, one per actual viewport change.
+
+Avalonia cannot enforce this itself. `TableViewLayoutHelper.UpdateActualWidths` distributes the star budget purely proportionally with no minimum awareness, so two star columns with a minimum above their share both render below it. The redistribution is therefore required, and the minimum cannot be delegated to the platform.
+
+### Star layout: removing the below-minimum flash
+
+The previous loop wrote `native.Width` as each column was resolved, so a constrained column could be arranged below its minimum for one frame and then snap to it. `StarColumnWidths.ComputeWidths` now resolves every width into a buffer and the caller applies them in one pass, so no width below the minimum is ever written. Verification: `Star_columns_never_apply_a_width_below_their_minimum_while_the_viewport_shrinks` asserts that every pixel width applied while shrinking from 900 to 200 is at or above the minimum, in addition to the existing `ActualWidth >= MinWidth` assertions.
+
 - Establish representative row and column counts, update rates, viewport sizes, themes, and interaction workloads. Row counts and a 20-column case are covered; update rates, viewport sizes, and themes are not yet varied.
 - Use existing benchmarks and profiling to measure auto-width passes, realized-cell traversal, layout invalidation, resize/reorder input, allocations, and UI responsiveness. Include many-column scenarios because native cells are not column-virtualized. Auto width is measured; scrolling, column moves, state restore, and star layout have benchmarks but no recorded baseline.
 - Record baseline environment and results; optimize only measured bottlenecks, then repeat the same measurements and retain regression coverage. The first baseline is recorded above; no bottleneck has been identified that justifies an optimization yet.

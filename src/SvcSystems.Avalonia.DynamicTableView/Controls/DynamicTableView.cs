@@ -47,8 +47,13 @@ public sealed partial class DynamicTableView : TableView
     private IReadOnlyList<DynamicTableViewFilterDescriptor> _headerFilters = [];
     private IDynamicTableViewSource? _attachedSource;
     private bool _autoWidthPassQueued;
-    private bool _starWidthUpdateQueued;
-    private readonly Action _updateStarWidths;
+    private bool _starWidthPassQueued;
+    private bool _columnSizingInvalidated = true;
+    private readonly Action _runStarWidthPass;
+    private GridLength[] _starWidthBuffer = [];
+    private (double Viewport, int Columns, int Revision) _lastStarWidthKey;
+    private int _widthRevision;
+    private bool _applyingStarWidths;
     private ScrollViewer? _scrollViewer;
     private bool _headerRefreshQueued;
     private bool _restoringState;
@@ -69,7 +74,7 @@ public sealed partial class DynamicTableView : TableView
     /// <summary>Creates an empty dynamic table.</summary>
     public DynamicTableView()
     {
-        _updateStarWidths = UpdateStarColumnMinimumWidths;
+        _runStarWidthPass = FlushStarColumnWidths;
         _resizeHeaders = new ResizeHeaderCache(this, IsKnownColumnKey);
         _resize = new ColumnResizeController(
             () => CanUserResizeColumns && Source is not null,
@@ -191,7 +196,7 @@ public sealed partial class DynamicTableView : TableView
         // Metadata can change while detached, when there is no attached table to notify.
         ApplyWidthMetadataToNativeColumns();
         LayoutUpdated += OnLayoutUpdated;
-        QueueStarColumnMinimumWidthUpdate();
+        InvalidateColumnSizing();
         QueueHeaderRefresh();
         QueueAutoWidthPass();
         QueueScrollRestore();
@@ -284,7 +289,8 @@ public sealed partial class DynamicTableView : TableView
         if (sender is not DynamicTableViewColumn definition || _applyingWidthMetadata)
             return;
         ApplyWidthMetadata(definition);
-        QueueStarColumnMinimumWidthUpdate();
+        InvalidateColumnSizing();
+        FlushColumnSizing();
         QueueAutoWidthPass();
     }
 
@@ -302,6 +308,7 @@ public sealed partial class DynamicTableView : TableView
     {
         // An explicit metadata change supersedes any width captured by a resize gesture.
         _manuallySizedColumns.Remove(definition.Key);
+        _widthRevision++;
         if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
             return;
         GridLength width = GetInitialWidth(definition, GetEffectiveMinWidth(definition, native));
@@ -363,6 +370,7 @@ public sealed partial class DynamicTableView : TableView
         if (_restoringState)
             return;
         _resizeHeaders.Invalidate();
+        _widthRevision++;
 
         if (Source is null || e.Action == NotifyCollectionChangedAction.Reset)
         {
@@ -403,11 +411,13 @@ public sealed partial class DynamicTableView : TableView
         }
         _resizeHeaders.Invalidate();
         SynchronizeWidthOptionsSubscriptions();
+        InvalidateColumnSizing();
         QueueAutoWidthPass();
     }
 
     private void RebuildNativeColumns()
     {
+        _widthRevision++;
         foreach (TableViewColumn discarded in _nativeColumns.Values)
             discarded.PropertyChanged -= NativeColumnOnPropertyChanged;
         _nativeColumns.Clear();
@@ -451,15 +461,32 @@ public sealed partial class DynamicTableView : TableView
         return native;
     }
 
-    /// <summary>Reapplies column sizing when a style changes the styled minimum width.</summary>
+    /// <summary>Reapplies column sizing when a style or the caller changes a column's width or minimum.</summary>
     private void NativeColumnOnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (e.Property != DynamicTableViewColumnProperties.MinWidthProperty ||
-            sender is not TableViewColumn { Header: DynamicTableViewColumn definition })
+        if (sender is not TableViewColumn { Header: DynamicTableViewColumn definition })
             return;
-        ApplyWidthMetadata(definition);
-        QueueStarColumnMinimumWidthUpdate();
-        QueueAutoWidthPass();
+
+        if (e.Property == DynamicTableViewColumnProperties.MinWidthProperty)
+        {
+            // A styled minimum changes the star result directly, so apply it before the next frame.
+            ApplyWidthMetadata(definition);
+            InvalidateColumnSizing();
+            FlushColumnSizing();
+            QueueAutoWidthPass();
+            return;
+        }
+
+        if (e.Property != TableViewColumn.WidthProperty)
+            return;
+
+        // A fixed column's realized width is an input to the star budget. Only an external write
+        // matters; the star pass's own writes are already reflected in the cached key, so ignoring
+        // them here keeps the pass from re-queueing itself every frame.
+        if (_applyingStarWidths)
+            return;
+
+        InvalidateColumnSizing();
     }
 
     private IDataTemplate CreateHeaderTemplate()
@@ -555,6 +582,7 @@ public sealed partial class DynamicTableView : TableView
         double newWidth = Math.Max(GetEffectiveMinWidth(definition, native), currentWidth + deltaX);
         _manuallySizedColumns.Add(definition.Key);
         SetColumnWidthMetadata(definition, DynamicTableViewWidthMode.Pixel, newWidth);
+        _widthRevision++;
         native.Width = new GridLength(newWidth);
     }
 
@@ -563,31 +591,52 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnLayoutUpdated(object? sender, EventArgs e)
     {
-        QueueStarColumnMinimumWidthUpdate();
+        FlushColumnSizing();
         _resizeHeaders.RefreshIfDirty();
         TryRestorePendingScrollOffset();
         QueueAutoWidthPass();
     }
 
-    private void QueueStarColumnMinimumWidthUpdate()
+    /// <summary>Marks the star layout as needing a recompute on the next layout pass.</summary>
+    /// <remarks>
+    /// Every mutation that can change a star width or a minimum must call this. The pass itself is
+    /// coalesced and skipped when its inputs are unchanged, so a scroll frame costs one comparison
+    /// instead of a full redistribution.
+    /// </remarks>
+    private void InvalidateColumnSizing()
     {
-        if (_starWidthUpdateQueued || Source is null || VisualRoot is null)
-            return;
-
-        for (int index = 0; index < Columns.Count; index++)
-        {
-            if (Columns[index].Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star })
-                continue;
-
-            _starWidthUpdateQueued = true;
-            Dispatcher.UIThread.Post(_updateStarWidths, DispatcherPriority.Background);
-            return;
-        }
+        _columnSizingInvalidated = true;
+        QueueColumnSizing();
     }
 
-    private void UpdateStarColumnMinimumWidths()
+    /// <summary>Queues one coalesced star-width pass for the current frame.</summary>
+    private void QueueColumnSizing()
     {
-        _starWidthUpdateQueued = false;
+        if (_starWidthPassQueued || _columnSizingInvalidated is false || Source is null || VisualRoot is null)
+            return;
+
+        _starWidthPassQueued = true;
+        Dispatcher.UIThread.Post(_runStarWidthPass, DispatcherPriority.Render);
+    }
+
+    /// <summary>
+    /// Recomputes every star column width and applies the result in a single write pass.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The result is computed completely before any width is written. Writing as each column is
+    /// resolved would let a column be arranged below its minimum for one frame and then snap back
+    /// to the minimum, which the user sees as a flash.
+    /// </para>
+    /// <para>
+    /// The key comparison happens on every layout pass, because the viewport and the realized
+    /// width of fixed columns are inputs that change without any invalidation call. Only the
+    /// redistribution and the writes are skipped, which is the expensive part.
+    /// </para>
+    /// </remarks>
+    private void FlushStarColumnWidths()
+    {
+        _starWidthPassQueued = false;
         if (Source is null || VisualRoot is null)
             return;
 
@@ -595,19 +644,57 @@ public sealed partial class DynamicTableView : TableView
         if (!double.IsFinite(availableWidth) || availableWidth <= 0)
             return;
 
-        double unitWidth = StarColumnWidths.ComputeUnitWidth(availableWidth, Columns);
-
-        for (int index = 0; index < Columns.Count; index++)
+        // The star result depends on the budget left after fixed columns take their realized
+        // width, the column composition, and the width metadata revision. Scrolling changes
+        // none of them, so a scroll frame only pays for this comparison.
+        double starBudget = StarColumnWidths.ComputeStarBudget(availableWidth, Columns);
+        var key = (starBudget, Columns.Count, _widthRevision);
+        if (key == _lastStarWidthKey)
         {
-            TableViewColumn native = Columns[index];
-            if (!native.IsVisible || native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star } definition)
-                continue;
-            double minimum = GetEffectiveMinWidth(definition, native);
-            GridLength width = ColumnWidthCalculator.GetStarWidth(definition, minimum, unitWidth);
-            if (native.Width != width)
+            _columnSizingInvalidated = false;
+            return;
+        }
+
+        if (_starWidthBuffer.Length < Columns.Count)
+            _starWidthBuffer = new GridLength[Columns.Count];
+
+        StarColumnWidths.ComputeWidths(starBudget, Columns, _starWidthBuffer);
+
+        var changed = false;
+        _applyingStarWidths = true;
+        try
+        {
+            for (var index = 0; index < Columns.Count; index++)
+            {
+                TableViewColumn native = Columns[index];
+                if (!native.IsVisible || native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star })
+                    continue;
+
+                GridLength width = _starWidthBuffer[index];
+                if (native.Width == width)
+                    continue;
+
                 native.Width = width;
+                changed = true;
+            }
+        }
+        finally
+        {
+            _applyingStarWidths = false;
+        }
+
+        _lastStarWidthKey = key;
+        _columnSizingInvalidated = false;
+        if (changed)
+        {
+            // The writes above invalidate layout, so the remaining passes run against the
+            // widths that were just applied rather than the stale ones.
+            _resizeHeaders.Invalidate();
         }
     }
+
+    /// <summary>Runs the pending star pass immediately instead of waiting for the next layout pass.</summary>
+    private void FlushColumnSizing() => FlushStarColumnWidths();
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {

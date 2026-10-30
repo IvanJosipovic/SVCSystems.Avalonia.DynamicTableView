@@ -337,6 +337,59 @@ public sealed class DynamicTableViewColumnLayoutTests
     }
 
     [AvaloniaFact]
+    public void Star_columns_never_apply_a_width_below_their_minimum_while_the_viewport_shrinks()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.MinWidth = 120;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Name);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.MinWidth = 120;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 900, Height = 300, Content = table };
+
+        // Every width the star pass applies must already respect the minimum. A pass that writes
+        // a too-small width and corrects it on the next frame is what the user sees as a flash.
+        var appliedBelowMinimum = new List<double>();
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            for (int width = 900; width >= 200; width -= 100)
+            {
+                window.Width = width;
+                Dispatcher.UIThread.RunJobs();
+
+                foreach (TableViewColumn column in table.Columns)
+                {
+                    if (column.Header is not DynamicTableViewColumn definition)
+                        continue;
+                    if (column.Width.GridUnitType != GridUnitType.Pixel)
+                        continue;
+                    if (column.Width.Value < definition.MinWidth)
+                        appliedBelowMinimum.Add(column.Width.Value);
+                }
+
+                Assert.True(table.Columns[0].ActualWidth >= first.MinWidth);
+                Assert.True(table.Columns[1].ActualWidth >= second.MinWidth);
+            }
+
+            Assert.Empty(appliedBelowMinimum);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Star_column_recovers_when_fixed_width_shrinks_without_viewport_expansion()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
