@@ -493,6 +493,69 @@ public sealed class DynamicTableViewColumnLayoutTests
     }
 
     [AvaloniaFact]
+    public void Star_column_reapplies_its_minimum_after_an_external_native_width_change()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name);
+        star.WidthMode = DynamicTableViewWidthMode.Star;
+        star.MinWidth = 300;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [star]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 200, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            table.Columns[0].Width = new GridLength(20);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].Width.Value >= star.MinWidth);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Visible_star_column_recomputes_when_another_star_column_is_hidden()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.MinWidth = 400;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Name);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.MinWidth = 400;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 640, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            double constrainedWidth = table.Columns[0].ActualWidth;
+
+            table.Columns[1].IsVisible = false;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].ActualWidth > constrainedWidth);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Weighted_star_columns_reserve_minima_and_recover_across_repeated_resizes()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);

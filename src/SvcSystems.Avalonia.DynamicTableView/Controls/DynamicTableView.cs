@@ -470,6 +470,13 @@ public sealed partial class DynamicTableView : TableView
         if (sender is not TableViewColumn { Header: DynamicTableViewColumn definition })
             return;
 
+        if (e.Property == TableViewColumn.IsVisibleProperty)
+        {
+            _widthRevision++;
+            InvalidateColumnSizing();
+            return;
+        }
+
         if (e.Property == DynamicTableViewColumnProperties.MinWidthProperty)
         {
             // A styled minimum changes the star result directly, so apply it before the next frame.
@@ -489,6 +496,7 @@ public sealed partial class DynamicTableView : TableView
         if (_applyingStarWidths)
             return;
 
+        _widthRevision++;
         InvalidateColumnSizing();
     }
 
@@ -784,13 +792,6 @@ public sealed partial class DynamicTableView : TableView
                 continue;
             if (definition.WidthMode is not (DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) ||
                 _manuallySizedColumns.Contains(definition.Key))
-                continue;
-
-            // A cell that already fits the column cannot raise it, so measuring it is wasted work.
-            // The text measurer lays the string out, which is the dominant cost of this pass, and
-            // this skips it for every cell narrower than the widest one already measured.
-            double available = cell.Bounds.Width - ColumnWidthCalculator.MeasuredTextPadding;
-            if (available > 0 && _cellSamples.TryGetValue(definition.Key, out var known) && known <= available)
                 continue;
 
             var measured = _textMeasurer.Measure(definition.GetDisplayValue(row)) + ColumnWidthCalculator.MeasuredTextPadding;

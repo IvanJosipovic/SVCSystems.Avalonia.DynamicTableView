@@ -80,7 +80,12 @@ To set a minimum width from a style, assign a class before the column is added t
 
 ```csharp
 columns[0].Classes.Add("wide-column");
+var source = new DynamicTableViewSource<Person, string>(
+    people, static person => person.Id, columns);
+var table = new DynamicTableView { Source = source };
 ```
+
+Apply the class before assigning `Source`; the table copies column classes when it creates its native columns.
 
 ```xml
 <Style xmlns:dyn="using:SvcSystems.Avalonia.DynamicTableView"

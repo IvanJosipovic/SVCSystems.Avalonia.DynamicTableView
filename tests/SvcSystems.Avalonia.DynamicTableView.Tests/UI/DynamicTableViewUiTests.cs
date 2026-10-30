@@ -1985,6 +1985,38 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
+    public void Auto_width_measures_longer_text_in_cells_that_fit_the_current_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> automatic = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        automatic.WidthMode = DynamicTableViewWidthMode.Auto;
+        automatic.MinWidth = 30;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [automatic]);
+        DynamicTableViewTestRow[] rows = DynamicTableViewTestData.CreateRows();
+        cache.AddOrUpdate(new[]
+        {
+            rows[0] with { Id = "short", Name = "A" },
+            rows[1] with { Id = "long", Name = new string('W', 60) }
+        });
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 700, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(table.Columns[0].ActualWidth > 100);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Changing_the_only_pixel_column_to_auto_starts_measuring_on_next_layout()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
