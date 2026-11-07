@@ -14,6 +14,53 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class StarColumnResizeTests
 {
     [AvaloniaFact]
+    public void Resizing_the_right_side_of_cells_star_divider_targets_namespace_without_changing_cells_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+
+        DynamicTableViewColumn<DynamicTableViewTestRow>[] columns =
+        [
+            CreateColumn("name", "Name", DynamicTableViewWidthMode.Star, 2),
+            CreateColumn("containers", "Containers", DynamicTableViewWidthMode.Cells),
+            CreateColumn("namespace", "Namespace", DynamicTableViewWidthMode.Star, 1),
+            CreateColumn("cpu", "CPU", DynamicTableViewWidthMode.Pixel, 80),
+            CreateColumn("memory", "Memory", DynamicTableViewWidthMode.Pixel, 80),
+            CreateColumn("restarts", "Restarts", DynamicTableViewWidthMode.Header),
+            CreateColumn("controlled-by", "Controlled By", DynamicTableViewWidthMode.Header),
+            CreateColumn("node", "Node", DynamicTableViewWidthMode.Header),
+            CreateColumn("qos", "QoS", DynamicTableViewWidthMode.Cells),
+            CreateColumn("age", "Age", DynamicTableViewWidthMode.Pixel, 80),
+            CreateColumn("status", "Status", DynamicTableViewWidthMode.Header)
+        ];
+
+        using var source = DynamicTableViewTestData.CreateSource(cache, columns);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 1600, Height = 400, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            double containersWidth = table.Columns[1].ActualWidth;
+            double namespaceWidth = table.Columns[2].ActualWidth;
+
+            // The right half of the Containers/Namespace divider selects Namespace.
+            DragColumnDivider(table, window, leftColumnIndex: 1, deltaX: 35, pointerOffsetFromDivider: 3);
+
+            Assert.Equal(containersWidth, table.Columns[1].ActualWidth, precision: 1);
+            Assert.InRange(table.Columns[2].ActualWidth - namespaceWidth, 34, 36);
+            Assert.Equal(DynamicTableViewWidthMode.Cells, columns[1].WidthMode);
+            Assert.Equal(DynamicTableViewWidthMode.Pixel, columns[2].WidthMode);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Sample_tabs_resize_each_mixed_width_column()
     {
         DynamicTableViewWidthMode[] expectedModes =
@@ -281,7 +328,8 @@ public sealed class StarColumnResizeTests
         DynamicTableView table,
         Window window,
         int leftColumnIndex,
-        double deltaX)
+        double deltaX,
+        double pointerOffsetFromDivider = -3)
     {
         TableViewColumnHeader header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
             .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[leftColumnIndex]));
@@ -290,7 +338,7 @@ public sealed class StarColumnResizeTests
         Point divider = grip.TranslatePoint(
             new Point(grip.Bounds.Width / 2, grip.Bounds.Height / 2), window)
             ?? throw new InvalidOperationException("Resize grip has no window position.");
-        Point start = new(divider.X - 3, divider.Y);
+        Point start = new(divider.X + pointerOffsetFromDivider, divider.Y);
         Point end = new(start.X + deltaX, start.Y);
 
         window.MouseDown(start, MouseButton.Left);
@@ -299,5 +347,18 @@ public sealed class StarColumnResizeTests
         Dispatcher.UIThread.RunJobs();
         window.MouseUp(end, MouseButton.Left);
         Dispatcher.UIThread.RunJobs();
+    }
+
+    private static DynamicTableViewColumn<DynamicTableViewTestRow> CreateColumn(
+        string key,
+        string header,
+        DynamicTableViewWidthMode widthMode,
+        double width = 1)
+    {
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            key, header, static row => row.Name);
+        column.WidthMode = widthMode;
+        column.Width = width;
+        return column;
     }
 }

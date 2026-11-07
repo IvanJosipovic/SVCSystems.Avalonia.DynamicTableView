@@ -29,7 +29,7 @@ internal sealed class ColumnResizeController
     /// <summary>Creates a controller.</summary>
     /// <param name="canResize">Reports whether a resize may start.</param>
     /// <param name="headers">The cache of realized headers and grips, used for hit testing.</param>
-    /// <param name="resolveHoverKey">Maps a hit divider to the key of the header that should show the hover highlight.</param>
+    /// <param name="resolveHoverKey">Maps a hit divider to the column on that side for resize targeting and hover feedback.</param>
     /// <param name="setHoverHeader">Applies the resize-hover class to the given header, or clears it when null.</param>
     public ColumnResizeController(
         Func<bool> canResize,
@@ -56,6 +56,7 @@ internal sealed class ColumnResizeController
     public string? ResizingColumnKey => _columnKey;
 
     /// <summary>Attempts to begin a resize gesture at <paramref name="position"/>.</summary>
+    /// <remarks>The left half of a divider selects its column; the right half selects the next column.</remarks>
     /// <returns>True when a gesture started and the caller should capture the pointer.</returns>
     public bool TryBegin(Point position, IPointer pointer, out string? columnKey)
     {
@@ -73,10 +74,14 @@ internal sealed class ColumnResizeController
         if (hit.Key is null)
             return false;
 
+        string? resizeKey = _resolveHoverKey(hit.Key, hit.IsRightHalf);
+        if (resizeKey is null)
+            return false;
+
         _pointer = pointer;
-        _columnKey = hit.Key;
+        _columnKey = resizeKey;
         _lastX = position.X;
-        columnKey = hit.Key;
+        columnKey = resizeKey;
         IsResizingChanged?.Invoke(this, true);
         return true;
     }
