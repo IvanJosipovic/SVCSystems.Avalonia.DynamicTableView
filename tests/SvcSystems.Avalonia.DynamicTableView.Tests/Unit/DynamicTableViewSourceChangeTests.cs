@@ -10,6 +10,64 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.Unit;
 public sealed class DynamicTableViewSourceChangeTests
 {
     [Fact]
+    public void Visible_same_key_sorted_update_restores_selected_row_at_its_new_index()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler worker = new();
+        ManualScheduler ui = new();
+        using var source = DynamicTableViewTestData.CreateSource(
+            cache, workerScheduler: worker, uiScheduler: ui);
+        DynamicTableViewTestRow[] initialRows = DynamicTableViewTestData.CreateRows();
+        cache.AddOrUpdate(initialRows);
+        worker.RunUntilIdle();
+        ui.RunUntilIdle();
+        source.SetSort([new("age", ListSortDirection.Ascending)]);
+        worker.RunUntilIdle();
+        ui.RunUntilIdle();
+
+        source.SelectionModel.Select(1);
+        DynamicTableViewTestRow updated = initialRows[1] with { Age = 5, Name = "Moved Beta" };
+        cache.AddOrUpdate(updated);
+
+        worker.RunUntilIdle();
+        Assert.True(ui.PendingCount > 0);
+        ui.RunUntilIdle();
+
+        Assert.Equal(0, worker.PendingCount);
+        Assert.Equal(["b", "a", "c"], source.Items.Cast<DynamicTableViewTestRow>().Select(static row => row.Id));
+        Assert.Equal(0, source.SelectionModel.SelectedIndex);
+        Assert.Same(updated, Assert.Single(source.SelectionModel.SelectedItems));
+    }
+
+    [Fact]
+    public void Filtered_out_same_key_update_drops_selection_and_does_not_restore_it()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler ui = new();
+        using var source = DynamicTableViewTestData.CreateSource(
+            cache, workerScheduler: ImmediateScheduler.Instance, uiScheduler: ui);
+        DynamicTableViewTestRow[] initialRows = DynamicTableViewTestData.CreateRows();
+        cache.AddOrUpdate(initialRows);
+        ui.RunUntilIdle();
+        source.SetFilter(new("age", DynamicTableViewFilterOperator.GreaterThan, 0));
+        ui.RunUntilIdle();
+        source.SelectionModel.Select(1);
+
+        DynamicTableViewTestRow hiddenUpdate = initialRows[1] with { Age = -5, Name = "Hidden Beta" };
+        cache.AddOrUpdate(hiddenUpdate);
+        ui.RunUntilIdle();
+
+        Assert.DoesNotContain(source.Items.Cast<DynamicTableViewTestRow>(), static row => row.Id == "b");
+        Assert.Empty(source.SelectionModel.SelectedItems);
+
+        source.ClearFilters();
+        ui.RunUntilIdle();
+
+        Assert.Contains(source.Items.Cast<DynamicTableViewTestRow>(), row => ReferenceEquals(row, hiddenUpdate));
+        Assert.Empty(source.SelectionModel.SelectedItems);
+    }
+
+    [Fact]
     public void Source_cache_updates_bound_rows_without_modifying_the_cache()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
@@ -106,9 +164,13 @@ public sealed class DynamicTableViewSourceChangeTests
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         worker.RunUntilIdle();
         ui.RunUntilIdle();
+        source.SetSort([new("age", ListSortDirection.Ascending)]);
+        worker.RunUntilIdle();
+        ui.RunUntilIdle();
         source.SelectionModel.Select(1);
+        source.SelectionModel.Select(2);
 
-        var replacement = original with { Name = "Updated" };
+        var replacement = original with { Age = 5, Name = "Updated" };
         cache.AddOrUpdate(replacement);
         worker.RunUntilIdle();
         ui.RunUntilIdle();
@@ -117,7 +179,9 @@ public sealed class DynamicTableViewSourceChangeTests
         worker.RunUntilIdle();
         ui.RunUntilIdle();
 
-        Assert.Same(replacement, Assert.Single(source.SelectionModel.SelectedItems));
+        Assert.Same(replacement, source.SelectionModel.SelectedItems
+            .Cast<DynamicTableViewTestRow>().Single(static row => row.Id == "b"));
+        Assert.Equal(["b", "c"], GetSelectedIds(source.SelectionModel.SelectedItems));
     }
 
     [Fact]
@@ -135,6 +199,42 @@ public sealed class DynamicTableViewSourceChangeTests
 
         cache.RemoveKey(updated.Id);
         Assert.Empty(source.Items);
+    }
+
+    [Fact]
+    public void Replacing_selected_row_keeps_selection_until_scheduled_identity_restore()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        ManualScheduler workerScheduler = new();
+        ManualScheduler uiScheduler = new();
+        using var source = DynamicTableViewTestData.CreateSource(
+            cache, workerScheduler: workerScheduler, uiScheduler: uiScheduler);
+        DynamicTableViewTestRow[] rows = DynamicTableViewTestData.CreateRows();
+        cache.AddOrUpdate(rows);
+        workerScheduler.RunUntilIdle();
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().Count() == rows.Length);
+        source.SelectionModel.Select(0);
+        source.SelectionModel.Select(1);
+
+        DynamicTableViewTestRow replacement = rows[1] with { Name = "Updated Beta" };
+        bool selectionWasLost = false;
+        source.SelectionModel.SelectionChanged += (_, _) =>
+            selectionWasLost |= !source.SelectionModel.SelectedItems.Any(item => ReferenceEquals(item, replacement)) ||
+                                !source.SelectionModel.SelectedItems.Any(item => ReferenceEquals(item, rows[0]));
+
+        cache.AddOrUpdate(replacement);
+        workerScheduler.RunUntilIdle();
+        uiScheduler.RunUntil(() => source.Items.Cast<DynamicTableViewTestRow>().Any(row => ReferenceEquals(row, replacement)) &&
+                                   source.SelectionModel.SelectedItems.Any(item => ReferenceEquals(item, replacement)));
+
+        Assert.Contains(source.SelectionModel.SelectedItems, item => ReferenceEquals(item, replacement));
+        Assert.False(selectionWasLost);
+        Assert.Equal(["a", "b"], GetSelectedIds(source.SelectionModel.SelectedItems));
+        Assert.Equal(0, workerScheduler.PendingCount);
+
+        uiScheduler.RunUntilIdle();
+        Assert.Contains(source.SelectionModel.SelectedItems, item => ReferenceEquals(item, replacement));
+        Assert.Equal(0, workerScheduler.PendingCount);
     }
 
     [Fact]

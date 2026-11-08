@@ -24,7 +24,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     private IReadOnlyList<DynamicTableViewFilterDescriptor> _filterDescriptors = Array.AsReadOnly(Array.Empty<DynamicTableViewFilterDescriptor>());
     private readonly Dictionary<string, Func<T, bool>> _customFilters = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Func<T, bool>> _scopeFilters = new(StringComparer.Ordinal);
-    private readonly IIdentityPreservingSelectionModel _selectionModel;
+    private readonly IIdentityPreservingSelectionModel<T> _selectionModel;
     private readonly IDisposable _searchSubscription;
     private readonly IDisposable _pipelineSubscription;
     private IReadOnlyList<DynamicTableViewSortDescriptor> _sortDescriptors = Array.AsReadOnly(Array.Empty<DynamicTableViewSortDescriptor>());
@@ -95,6 +95,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
                 ResetOnFirstTimeLoad = true,
                 Scheduler = _uiScheduler
             })
+            .Do(ObserveBoundChangeset)
             .Subscribe(
                 static _ => { },
                 ex => SourceError?.Invoke(this, ex));
@@ -344,6 +345,30 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
             }
         };
         _filterSubject.OnNext(filter);
+    }
+
+    private void ObserveBoundChangeset(IChangeSet<T, TKey> changes)
+    {
+        bool isSingleSameKeyUpdate = false;
+        T previousItem = default!;
+        T currentItem = default!;
+
+        // The filtered SortAndBind stream reports Update only while the row remains visible;
+        // rows leaving the filter arrive as Remove and stay on the general restore path.
+        if (_selectionIdentityMode == DynamicTableViewSelectionIdentityMode.Key && changes.Count == 1)
+        {
+            foreach (var change in changes)
+            {
+                if (change.Reason == ChangeReason.Update && change.Previous.HasValue)
+                {
+                    isSingleSameKeyUpdate = true;
+                    previousItem = change.Previous.Value;
+                    currentItem = change.Current;
+                }
+            }
+        }
+
+        _selectionModel.OnBoundChangeset(isSingleSameKeyUpdate, previousItem, currentItem);
     }
 
     private IComparer<T> BuildComparer(IReadOnlyList<DynamicTableViewSortDescriptor> descriptors)

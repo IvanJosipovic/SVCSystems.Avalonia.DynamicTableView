@@ -34,4 +34,27 @@ internal sealed class AvaloniaDispatcherScheduler : LocalScheduler
 
         return composite;
     }
+
+    internal IDisposable ScheduleAtPriority<TState>(
+        TState state,
+        DispatcherPriority priority,
+        Func<IScheduler, TState, IDisposable> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var composite = new CompositeDisposable();
+        var cancellation = new CancellationDisposable();
+        composite.Add(cancellation);
+
+        void Run()
+        {
+            if (!cancellation.Token.IsCancellationRequested)
+            {
+                composite.Add(action(this, state));
+            }
+        }
+
+        Dispatcher.UIThread.Post(Run, priority);
+        return composite;
+    }
 }
