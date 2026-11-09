@@ -86,7 +86,6 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     private void ColumnOnHeaderChanged(object? sender, EventArgs e)
     {
         HeaderText = Column.Header.ToString() ?? string.Empty;
-        _owner.NotifyColumnHeaderChanged();
     }
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
@@ -176,8 +175,8 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
     {
         _sortPointerDown = IsSortEnabled &&
             e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed &&
-            !IsWithinNamedControl(e.Source, "PART_FilterButton") &&
-            !IsWithinClass(e.Source, "dynamic-table-view-column-resize-grip");
+            !ControlTreeHelpers.IsWithinNamedControl(e.Source, "PART_FilterButton") &&
+            !ControlTreeHelpers.IsWithinClass(e.Source, "dynamic-table-view-column-resize-grip");
         if (_sortPointerDown)
             _sortPointerDownPosition = e.GetPosition(this);
     }
@@ -204,10 +203,4 @@ internal sealed partial class DynamicTableViewHeader : TemplatedControl
             _owner.SortColumn(Column.Key);
     }
 
-    private static bool IsWithinNamedControl(object? source, string name)
-        => source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Control>().Any(control => control.Name == name);
-
-    private static bool IsWithinClass(object? source, string className)
-        => source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Control>()
-            .Any(control => control.Classes.Contains(className));
 }

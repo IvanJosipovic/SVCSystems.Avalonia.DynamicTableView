@@ -15,13 +15,20 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class DynamicTableViewColumnResizeRestoreTests
 {
     [AvaloniaFact]
-    public void Native_resize_observer_recovers_after_pointer_crosses_clamped_divider()
+    public void Native_resize_remains_at_minimum_while_pointer_is_inside_the_overshoot()
     {
         DynamicTableViewColumn<DynamicTableViewTestRow> definition = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        definition.WidthMode = DynamicTableViewWidthMode.Star;
+        definition.Width = new GridLength(definition.Width.Value > 0 ? definition.Width.Value : 1, GridUnitType.Star);
         definition.MinWidth = 100;
-        TableViewColumn native = new() { Header = "Name", Width = new GridLength(1, GridUnitType.Star) };
+        definition.MaxWidth = 180;
+        TableViewColumn native = new()
+        {
+            Header = "Name",
+            Width = new GridLength(1, GridUnitType.Star),
+            MinWidth = 100,
+            MaxWidth = 180
+        };
         TableView table = new() { CanUserResizeColumns = true };
         table.Columns.Add(native);
         bool updating = false;
@@ -32,11 +39,8 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             updating = true;
             try
             {
-                double width = Math.Max(definition.MinWidth, native.Width.Value);
-                if (native.Width.Value != width)
-                    native.Width = new GridLength(width);
-                definition.WidthMode = DynamicTableViewWidthMode.Pixel;
-                definition.Width = width;
+                double width = native.Width.Value;
+                definition.Width = new GridLength(width);
             }
             finally
             {
@@ -60,8 +64,8 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             window.MouseMove(end, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(100, native.Width.Value);
-            Assert.Equal(100, definition.Width);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, definition.WidthMode);
+            Assert.Equal(100, definition.Width.Value);
+            Assert.Equal(GridUnitType.Pixel, definition.Width.GridUnitType);
             Point reverse = new(end.X + 30, end.Y);
             window.MouseMove(reverse, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
@@ -69,20 +73,21 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             Point pastMinimum = new(start.X - 270, start.Y);
             window.MouseMove(pastMinimum, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
-            Assert.True(native.Width.Value > 100);
+            Assert.Equal(100, native.Width.Value);
+            Assert.True(native.Width.Value <= 180);
             Assert.Equal(3, deltas.Count);
             Assert.True(deltas[0] < 0);
             Assert.True(deltas[1] < 0);
-            Assert.True(deltas[2] > 0);
+            Assert.True(deltas[2] < 0);
             Assert.NotNull(captures[0]);
             Assert.Contains(grip.GetVisualDescendants(), visual => ReferenceEquals(visual, captures[0]));
             Assert.All(captures, captured => Assert.Same(captures[0], captured));
             Assert.Equal(3, captures.Count);
             window.MouseUp(pastMinimum, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
-            DynamicTableViewColumnState state = new(definition.Key, 0, definition.Width, definition.WidthMode);
-            Assert.Equal(native.Width.Value, state.Width);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.WidthMode);
+            DynamicTableViewColumnState state = new(definition.Key, 0, definition.Width);
+            Assert.Equal(native.Width, state.Width);
+            Assert.Equal(GridUnitType.Pixel, state.Width.GridUnitType);
         }
         finally
         {
@@ -171,18 +176,61 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
     }
 
     [AvaloniaFact]
+    public void Native_table_resize_honors_column_minimum_and_maximum()
+    {
+        TableViewColumn column = new()
+        {
+            Header = "Limited",
+            Width = new GridLength(150),
+            MinWidth = 100,
+            MaxWidth = 180
+        };
+        TableView table = new() { CanUserResizeColumns = true };
+        table.Columns.Add(column);
+        Window window = new() { Width = 500, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            DragNativeColumn(window, table, column, 500);
+            Assert.Equal(180, column.Width.Value);
+
+            DragNativeColumn(window, table, column, -500);
+            Assert.Equal(100, column.Width.Value);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static void DragNativeColumn(Window window, TableView table, TableViewColumn column, double deltaX)
+    {
+        TableViewColumnHeader header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+            .Single(candidate => ReferenceEquals(candidate.Column, column));
+        Thumb grip = Assert.Single(header.GetVisualDescendants().OfType<Thumb>(), candidate => candidate.Name == "PART_Resizer");
+        Point start = grip.TranslatePoint(new Point(grip.Bounds.Width / 2, grip.Bounds.Height / 2), window)!.Value;
+        Point end = new(start.X + deltaX, start.Y);
+        window.MouseDown(start, MouseButton.Left);
+        window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+        Dispatcher.UIThread.RunJobs();
+        window.MouseUp(end, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
     public void Divider_drag_resizes_the_column_on_its_left()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableViewColumn<DynamicTableViewTestRow> latency = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "latency", "Latency", static row => row.Name);
-        latency.WidthMode = DynamicTableViewWidthMode.Pixel;
-        latency.Width = 140;
+        latency.Width = new GridLength(140);
         DynamicTableViewColumn<DynamicTableViewTestRow> policy = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "policy", "Policy", static row => row.Id);
-        policy.WidthMode = DynamicTableViewWidthMode.Pixel;
-        policy.Width = 160;
+        policy.Width = new GridLength(160);
         using var source = DynamicTableViewTestData.CreateSource(cache, [latency, policy]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 900, Height = 400, Content = table };
@@ -221,15 +269,16 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
 
+            double initialWidth = table.Columns[0].ActualWidth;
             DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
             double resizedWidth = table.Columns[0].Width.Value;
-            Assert.Equal(130, resizedWidth);
+            Assert.InRange(resizedWidth - initialWidth, 39, 41);
 
             DynamicTableViewState state = table.CaptureState();
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[0].WidthMode);
-            Assert.Equal(resizedWidth, state.Columns[0].Width);
+            Assert.Equal(GridUnitType.Pixel, state.Columns[0].Width.GridUnitType);
+            Assert.Equal(resizedWidth, state.Columns[0].Width.Value);
 
             // A reloaded view builds a new table and restores the previously saved widths.
             DynamicTableView restored = new() { Source = source, CanUserResizeColumns = true };
@@ -276,11 +325,12 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             panel.Children.Add(table);
             Dispatcher.UIThread.RunJobs();
 
+            double initialWidth = table.Columns[0].ActualWidth;
             DragColumnDivider(table, host, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
             double resizedWidth = table.Columns[0].Width.Value;
-            Assert.Equal(130, resizedWidth);
+            Assert.InRange(resizedWidth - initialWidth, 39, 41);
 
             DynamicTableViewState state = table.CaptureState();
 
@@ -383,10 +433,11 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             table.RestoreState(table.CaptureState());
             Dispatcher.UIThread.RunJobs();
 
+            double initialWidth = table.Columns[0].ActualWidth;
             DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(130, table.Columns[0].Width.Value);
+            Assert.InRange(table.Columns[0].Width.Value - initialWidth, 39, 41);
         }
         finally
         {
@@ -401,13 +452,11 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableViewColumn<DynamicTableViewTestRow> name = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        name.WidthMode = DynamicTableViewWidthMode.Pixel;
-        name.Width = 150;
+        name.Width = new GridLength(150);
         name.MinWidth = 100;
         DynamicTableViewColumn<DynamicTableViewTestRow> age = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "age", "Age", static row => row.Age);
-        age.WidthMode = DynamicTableViewWidthMode.Pixel;
-        age.Width = 150;
+        age.Width = new GridLength(150);
         using var source = DynamicTableViewTestData.CreateSource(cache, [name, age]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 900, Height = 400, Content = table };
@@ -423,8 +472,8 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             DragColumnDividerGesture(table, window, leftColumnIndex: 0, [-200, 30]);
 
             Assert.Equal(130, table.Columns[0].Width.Value);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, name.WidthMode);
-            Assert.Equal(130, table.CaptureState().Columns[0].Width);
+            Assert.Equal(GridUnitType.Pixel, name.Width.GridUnitType);
+            Assert.Equal(130, table.CaptureState().Columns[0].Width.Value);
             Assert.Equal(150, table.Columns[1].Width.Value);
         }
         finally
@@ -498,8 +547,7 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
                 {
                     DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
                         $"column-{index}", $"Column {index}", static row => row.Name);
-                    column.WidthMode = DynamicTableViewWidthMode.Pixel;
-                    column.Width = 200;
+                    column.Width = new GridLength(200);
                     column.MinWidth = 40;
                     return column;
                 })
@@ -538,13 +586,11 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableViewColumn<DynamicTableViewTestRow> name = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        name.WidthMode = DynamicTableViewWidthMode.Pixel;
-        name.Width = 150;
+        name.Width = new GridLength(150);
         name.MinWidth = 40;
         DynamicTableViewColumn<DynamicTableViewTestRow> age = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "age", "Age", static row => row.Age);
-        age.WidthMode = DynamicTableViewWidthMode.Pixel;
-        age.Width = 150;
+        age.Width = new GridLength(150);
         age.MinWidth = 40;
         using var first = DynamicTableViewTestData.CreateSource(cache, [name, age]);
         using var second = DynamicTableViewTestData.CreateSource(cache, [name, age]);
@@ -569,11 +615,11 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
 
             // The definition is shared, so the resize propagates to the other attached table and
             // both agree with the metadata they would capture.
-            Assert.Equal(190, name.Width);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, name.WidthMode);
+            Assert.Equal(190, name.Width.Value);
+            Assert.Equal(GridUnitType.Pixel, name.Width.GridUnitType);
             Assert.Equal(190, firstTable.Columns[0].Width.Value);
             Assert.Equal(190, secondTable.Columns[0].Width.Value);
-            Assert.Equal(190, secondTable.CaptureState().Columns[0].Width);
+            Assert.Equal(190, secondTable.CaptureState().Columns[0].Width.Value);
             Assert.Equal(150, firstTable.Columns[1].Width.Value);
             Assert.Equal(150, secondTable.Columns[1].Width.Value);
         }
@@ -584,18 +630,17 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
     }
 
     [AvaloniaFact]
-    public void Header_change_remeasures_in_every_table_sharing_the_definition()
+    public void Header_change_keeps_shared_auto_width_in_every_table()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableViewColumn<DynamicTableViewTestRow> name = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        name.WidthMode = DynamicTableViewWidthMode.Header;
+        name.Width = GridLength.Auto;
         name.MinWidth = 40;
         DynamicTableViewColumn<DynamicTableViewTestRow> age = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "age", "Age", static row => row.Age);
-        age.WidthMode = DynamicTableViewWidthMode.Pixel;
-        age.Width = 150;
+        age.Width = new GridLength(150);
         using var first = DynamicTableViewTestData.CreateSource(cache, [name, age]);
         using var second = DynamicTableViewTestData.CreateSource(cache, [name, age]);
         DynamicTableView firstTable = new() { Source = first, CanUserResizeColumns = true };
@@ -612,15 +657,11 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
 
-            double firstBefore = firstTable.Columns[0].Width.Value;
-            double secondBefore = secondTable.Columns[0].Width.Value;
-
-            // A shared definition's header change must re-measure both tables that show it.
             name.Header = "A considerably wider header label";
             Dispatcher.UIThread.RunJobs();
 
-            Assert.True(firstTable.Columns[0].Width.Value > firstBefore);
-            Assert.True(secondTable.Columns[0].Width.Value > secondBefore);
+            Assert.Equal(GridUnitType.Auto, firstTable.Columns[0].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Auto, secondTable.Columns[0].Width.GridUnitType);
         }
         finally
         {
@@ -635,8 +676,7 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableViewColumn<DynamicTableViewTestRow> only = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        only.WidthMode = DynamicTableViewWidthMode.Pixel;
-        only.Width = 150;
+        only.Width = new GridLength(150);
         only.MinWidth = 100;
         using var source = DynamicTableViewTestData.CreateSource(cache, [only]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
@@ -651,13 +691,13 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: 40);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(190, table.Columns[0].Width.Value);
-            Assert.Equal(190, only.Width);
+            Assert.Equal(190, only.Width.Value);
 
             // The last column clamps at its minimum like any other.
             DragColumnDivider(table, window, leftColumnIndex: 0, deltaX: -400);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(100, table.Columns[0].Width.Value);
-            Assert.Equal(100, table.CaptureState().Columns[0].Width);
+            Assert.Equal(100, table.CaptureState().Columns[0].Width.Value);
         }
         finally
         {
@@ -672,12 +712,10 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableViewColumn<DynamicTableViewTestRow> name = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        name.WidthMode = DynamicTableViewWidthMode.Pixel;
-        name.Width = 150;
+        name.Width = new GridLength(150);
         DynamicTableViewColumn<DynamicTableViewTestRow> age = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "age", "Age", static row => row.Age);
-        age.WidthMode = DynamicTableViewWidthMode.Pixel;
-        age.Width = 150;
+        age.Width = new GridLength(150);
         using var source = DynamicTableViewTestData.CreateSource(cache, [name, age]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 900, Height = 400, Content = table };
@@ -724,20 +762,17 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
     {
         var name = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        name.WidthMode = DynamicTableViewWidthMode.Auto;
-        name.Width = 1;
+        name.Width = GridLength.Auto;
         name.MinWidth = 90;
 
         var age = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "age", "Age", static row => row.Age);
-        age.WidthMode = DynamicTableViewWidthMode.Pixel;
-        age.Width = 150;
+        age.Width = new GridLength(150);
         age.MinWidth = 40;
 
         var created = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "created", "Created", static row => row.CreatedAt);
-        created.WidthMode = DynamicTableViewWidthMode.Pixel;
-        created.Width = 150;
+        created.Width = new GridLength(150);
         created.MinWidth = 40;
 
         return [name, age, created];

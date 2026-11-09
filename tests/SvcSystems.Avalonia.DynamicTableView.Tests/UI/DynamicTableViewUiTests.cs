@@ -134,62 +134,34 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Auto_width_pass_only_measures_auto_and_cells_columns()
+    public void Default_auto_width_uses_native_one_star_allocation()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
-        var pixelCalls = 0;
-        var starCalls = 0;
-        var autoCalls = 0;
-        var cellsCalls = 0;
-        var pixel = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "pixel", "Pixel", static row => row.Name, row =>
-            {
-                pixelCalls++;
-                return row.Name;
-            });
-        pixel.WidthMode = DynamicTableViewWidthMode.Pixel;
-        pixel.Width = 120;
-        var star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "star", "Star", static row => row.Name, row =>
-            {
-                starCalls++;
-                return row.Name;
-            });
-        star.WidthMode = DynamicTableViewWidthMode.Star;
-        var auto = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "auto", "Auto", static row => row.Name, row =>
-            {
-                autoCalls++;
-                return row.Name;
-            });
-        var cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "cells", "Cells", static row => row.Name, row =>
-            {
-                cellsCalls++;
-                return row.Name;
-            });
-        cells.WidthMode = DynamicTableViewWidthMode.Cells;
-        using var source = DynamicTableViewTestData.CreateSource(cache, [pixel, star, auto, cells]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> automatic = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "automatic", "Auto", static row => row.Name);
+        DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "star", "Star", static row => row.Name);
+        star.Width = new GridLength(1, GridUnitType.Star);
+        Assert.Equal(GridLength.Auto, automatic.Width);
+        using var source = DynamicTableViewTestData.CreateSource(cache, [automatic, star]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
         DynamicTableView table = new() { Source = source };
-        Window window = new() { Width = 640, Height = 260, Content = table };
+        Window window = new() { Width = 760, Height = 260, Content = table };
 
         try
         {
             window.Show();
             Dispatcher.UIThread.RunJobs();
-            var pixelBefore = pixelCalls;
-            var starBefore = starCalls;
-            var autoBefore = autoCalls;
-            var cellsBefore = cellsCalls;
+            Assert.Equal(GridUnitType.Auto, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
+            Assert.InRange(Math.Abs(table.Columns[0].ActualWidth - table.Columns[1].ActualWidth), 0, 1);
 
-            window.Height += 10;
+            double initialAutoWidth = table.Columns[0].ActualWidth;
+            automatic.Header = "A deliberately longer header label";
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(pixelBefore, pixelCalls);
-            Assert.Equal(starBefore, starCalls);
-            Assert.True(autoCalls > autoBefore);
-            Assert.True(cellsCalls > cellsBefore);
+            Assert.Equal(GridUnitType.Auto, table.Columns[0].Width.GridUnitType);
+            Assert.InRange(Math.Abs(table.Columns[0].ActualWidth - initialAutoWidth), 0, 1);
         }
         finally
         {
@@ -372,8 +344,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
@@ -413,8 +384,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
@@ -451,8 +421,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
@@ -492,8 +461,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
@@ -540,8 +508,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         column.FilterChoices = [new("Alpha", "Alpha")];
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
@@ -586,8 +553,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static item => item.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         column.FilterFlyoutFactory = static _ => new Border();
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
@@ -623,8 +589,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 220;
+        column.Width = new GridLength(220);
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         DynamicTableView table = new() { Source = source };
@@ -667,8 +632,7 @@ public sealed class DynamicTableViewUiTests
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         var nameColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create("name", "Name", static row => row.Name);
-        nameColumn.WidthMode = DynamicTableViewWidthMode.Pixel;
-        nameColumn.Width = 220;
+        nameColumn.Width = new GridLength(220);
         using var source = DynamicTableViewTestData.CreateSource(cache, [nameColumn]);
         cache.AddOrUpdate([
             DynamicTableViewTestData.CreateRows()[0] with { Name = "Gamma" },
@@ -959,7 +923,7 @@ public sealed class DynamicTableViewUiTests
         Window window = new() { Width = 1200, Height = 320, Content = table };
         var expectedHeaders = source.Columns.Select(static column => column.Header.ToString() ?? string.Empty).ToArray();
         var savedColumns = source.Columns
-            .Select((column, index) => new DynamicTableViewColumnState(column.Key, index, 140))
+            .Select((column, index) => new DynamicTableViewColumnState(column.Key, index, new GridLength(140)))
             .ToArray();
         savedColumns[0] = savedColumns[0] with { Order = 1 };
         savedColumns[1] = savedColumns[1] with { Order = 0 };
@@ -1101,8 +1065,8 @@ public sealed class DynamicTableViewUiTests
         DynamicTableView table = new() { Source = source };
         DynamicTableViewState state = new(
         [
-            new("age", 0, 123),
-            new("name", 1, 180)
+            new("age", 0, new GridLength(123)),
+            new("name", 1, new GridLength(180))
         ],
         [new("age", ListSortDirection.Descending)],
         [new("age", DynamicTableViewFilterOperator.GreaterThan, 15)]);
@@ -1117,7 +1081,7 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Restored_table_headers_remain_visible_after_switching_tabs()
+        public void Restored_table_headers_remain_visible_after_switching_tabs()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         using var source = DynamicTableViewTestData.CreateSource(cache);
@@ -1146,7 +1110,7 @@ public sealed class DynamicTableViewUiTests
             AssertVisibleHeaders(table, initialHeaders);
 
             table.RestoreState(new(
-                [new("age", 0, 120), new("name", 1, 180)],
+                [new("age", 0, new GridLength(120)), new("name", 1, new GridLength(180))],
                 [],
                 [],
                 default));
@@ -1250,14 +1214,12 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Column_width_modes_preserve_pixel_and_star_settings()
+    public void Column_grid_lengths_preserve_pixel_star_and_default_auto_settings()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         var columns = DynamicTableViewTestData.CreateColumns();
-        columns[0].WidthMode = DynamicTableViewWidthMode.Pixel;
-        columns[0].Width = 155;
-        columns[1].WidthMode = DynamicTableViewWidthMode.Star;
-        columns[1].Width = 2;
+        columns[0].Width = new GridLength(155);
+        columns[1].Width = new GridLength(2, GridUnitType.Star);
         using var source = DynamicTableViewTestData.CreateSource(cache, columns);
         DynamicTableView table = new() { Source = source };
 
@@ -1265,6 +1227,7 @@ public sealed class DynamicTableViewUiTests
         Assert.Equal(155, table.Columns[0].Width.Value);
         Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
         Assert.Equal(2, table.Columns[1].Width.Value);
+        Assert.Equal(GridUnitType.Auto, table.Columns[2].Width.GridUnitType);
     }
 
     [AvaloniaFact]
@@ -1273,12 +1236,10 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "first", "First", static row => row.Name);
-        first.WidthMode = DynamicTableViewWidthMode.Star;
-        first.Width = 1;
+        first.Width = new GridLength(1, GridUnitType.Star);
         DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "second", "Second", static row => row.Id);
-        second.WidthMode = DynamicTableViewWidthMode.Star;
-        second.Width = 2;
+        second.Width = new GridLength(2, GridUnitType.Star);
         using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
         DynamicTableView table = new() { Source = source };
         Window window = new() { Width = 640, Height = 320, Content = table };
@@ -1288,10 +1249,10 @@ public sealed class DynamicTableViewUiTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
             var originalState = table.CaptureState();
-            Assert.Equal(DynamicTableViewWidthMode.Star, originalState.Columns[0].WidthMode);
-            Assert.Equal(1, originalState.Columns[0].Width);
-            Assert.Equal(DynamicTableViewWidthMode.Star, originalState.Columns[1].WidthMode);
-            Assert.Equal(2, originalState.Columns[1].Width);
+            Assert.Equal(GridUnitType.Star, originalState.Columns[0].Width.GridUnitType);
+            Assert.Equal(1, originalState.Columns[0].Width.Value);
+            Assert.Equal(GridUnitType.Star, originalState.Columns[1].Width.GridUnitType);
+            Assert.Equal(2, originalState.Columns[1].Width.Value);
 
             window.Width = 960;
             Dispatcher.UIThread.RunJobs();
@@ -1324,13 +1285,11 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "first", "First", static row => row.Name);
-        first.WidthMode = DynamicTableViewWidthMode.Star;
-        first.Width = 1;
+        first.Width = new GridLength(1, GridUnitType.Star);
         first.MinWidth = 120;
         DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "second", "Second", static row => row.Id);
-        second.WidthMode = DynamicTableViewWidthMode.Star;
-        second.Width = 1;
+        second.Width = new GridLength(1, GridUnitType.Star);
         second.MinWidth = 120;
         using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
         DynamicTableView table = new() { Source = source };
@@ -1459,12 +1418,10 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "first", "First", static row => row.Name);
-        first.WidthMode = DynamicTableViewWidthMode.Star;
-        first.Width = 1;
+        first.Width = new GridLength(1, GridUnitType.Star);
         DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "second", "Second", static row => row.Id);
-        second.WidthMode = DynamicTableViewWidthMode.Star;
-        second.Width = 1;
+        second.Width = new GridLength(1, GridUnitType.Star);
         using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 640, Height = 320, Content = table };
@@ -1486,7 +1443,7 @@ public sealed class DynamicTableViewUiTests
             window.MouseDown(resizeStart, MouseButton.Left);
             window.MouseUp(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
-            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Star, source.Columns[1].Width.GridUnitType);
             Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
 
             window.MouseDown(resizeStart, MouseButton.Left);
@@ -1495,9 +1452,9 @@ public sealed class DynamicTableViewUiTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, source.Columns[0].Width.GridUnitType);
             DynamicTableViewState state = table.CaptureState();
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, state.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, state.Columns[0].Width.GridUnitType);
 
             window.Width = 960;
             Dispatcher.UIThread.RunJobs();
@@ -1505,7 +1462,7 @@ public sealed class DynamicTableViewUiTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
-            Assert.Equal(state.Columns[0].Width, table.Columns[0].Width.Value);
+            Assert.Equal(state.Columns[0].Width.Value, table.Columns[0].Width.Value);
             Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
         }
         finally
@@ -1520,12 +1477,10 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> memory = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "memory", "Memory", static row => row.Age);
-        memory.WidthMode = DynamicTableViewWidthMode.Pixel;
-        memory.Width = 150;
+        memory.Width = new GridLength(150);
         DynamicTableViewColumn<DynamicTableViewTestRow> created = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "created", "Created", static row => row.CreatedAt);
-        created.WidthMode = DynamicTableViewWidthMode.Pixel;
-        created.Width = 180;
+        created.Width = new GridLength(180);
         using var source = DynamicTableViewTestData.CreateSource(cache, [memory, created]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 640, Height = 320, Content = table };
@@ -1599,24 +1554,22 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> firstStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "first-star", "First Star", static row => row.Name);
-        firstStar.WidthMode = DynamicTableViewWidthMode.Star;
-        firstStar.Width = 1;
+        firstStar.Width = new GridLength(1, GridUnitType.Star);
         firstStar.MinWidth = 80;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> secondStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "second-star", "Second Star", static row => row.Id);
-        secondStar.WidthMode = DynamicTableViewWidthMode.Star;
-        secondStar.Width = 2;
+        secondStar.Width = new GridLength(2, GridUnitType.Star);
         secondStar.MinWidth = 80;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> headerColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "header", "Header", static row => row.Name);
-        headerColumn.WidthMode = DynamicTableViewWidthMode.Header;
+        headerColumn.Width = GridLength.Auto;
         headerColumn.MinWidth = 100;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> cellsColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "cells", "Cells", static row => row.Name);
-        cellsColumn.WidthMode = DynamicTableViewWidthMode.Cells;
+        cellsColumn.Width = GridLength.Auto;
         cellsColumn.MinWidth = 100;
 
         using var source = DynamicTableViewTestData.CreateSource(cache, [firstStar, secondStar, headerColumn, cellsColumn]);
@@ -1644,8 +1597,6 @@ public sealed class DynamicTableViewUiTests
 
             double initialFirstStarWidth = table.Columns[0].ActualWidth;
             double initialSecondStarWidth = table.Columns[1].ActualWidth;
-            double initialHeaderWidth = table.Columns[2].ActualWidth;
-            double initialCellsWidth = table.Columns[3].ActualWidth;
 
             window.MouseDown(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
@@ -1658,15 +1609,15 @@ public sealed class DynamicTableViewUiTests
                 "Dragging right on the divider between first and second Star should widen the second Star column.");
             Assert.True(table.Columns[0].ActualWidth < initialFirstStarWidth);
             
-            // Header and Cells columns should remain unchanged
-            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
-            Assert.Equal(initialCellsWidth, table.Columns[3].ActualWidth, precision: 1);
+            // Both columns retain their native Auto allocation request.
+            Assert.Equal(GridUnitType.Auto, table.Columns[2].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Auto, table.Columns[3].Width.GridUnitType);
 
             // The second Star column should now be in Pixel mode (manually sized)
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, source.Columns[1].Width.GridUnitType);
             Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
             
-            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, source.Columns[0].Width.GridUnitType);
             Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
         }
         finally
@@ -1676,25 +1627,23 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Resizing_between_star_and_header_resizes_star_column()
+    public void Resizing_star_with_auto_neighbors_keeps_their_width_requests()
     {
-        // Scenario: first column is Star, second is Header
-        // User resizes the divider between Star and Header
+        // Scenario: first column is Star, followed by native Auto columns.
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "star", "Star", static row => row.Name);
-        star.WidthMode = DynamicTableViewWidthMode.Star;
-        star.Width = 1;
+        star.Width = new GridLength(1, GridUnitType.Star);
         star.MinWidth = 80;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> header = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "header", "Header", static row => row.Name);
-        header.WidthMode = DynamicTableViewWidthMode.Header;
+        header.Width = GridLength.Auto;
         header.MinWidth = 100;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "cells", "Cells", static row => row.Name);
-        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        cells.Width = GridLength.Auto;
         cells.MinWidth = 100;
 
         using var source = DynamicTableViewTestData.CreateSource(cache, [star, header, cells]);
@@ -1707,7 +1656,7 @@ public sealed class DynamicTableViewUiTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
 
-            // Get the Star column header (index 0) - its grip is the divider between Star and Header
+            // Get the Star column header (index 0) - its grip is the divider before the Auto columns.
             var starHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
                 .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
             var resizeGrip = Assert.Single(starHeader.GetVisualDescendants().OfType<Thumb>(),
@@ -1720,8 +1669,6 @@ public sealed class DynamicTableViewUiTests
             Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
 
             double initialStarWidth = table.Columns[0].ActualWidth;
-            double initialHeaderWidth = table.Columns[1].ActualWidth;
-            double initialCellsWidth = table.Columns[2].ActualWidth;
 
             window.MouseDown(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
@@ -1732,14 +1679,13 @@ public sealed class DynamicTableViewUiTests
 
             // The Star column (index 0) should widen
             Assert.True(table.Columns[0].ActualWidth > initialStarWidth,
-                "Dragging right on the divider between Star and Header should widen the Star column.");
+                "Dragging right on the divider before Auto should widen the Star column.");
             
-            // Header and Cells columns should remain unchanged
-            Assert.Equal(initialHeaderWidth, table.Columns[1].ActualWidth, precision: 1);
-            Assert.Equal(initialCellsWidth, table.Columns[2].ActualWidth, precision: 1);
+            Assert.Equal(GridUnitType.Auto, table.Columns[1].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Auto, table.Columns[2].Width.GridUnitType);
 
             // The Star column should now be in Pixel mode (manually sized)
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, source.Columns[0].Width.GridUnitType);
             Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
         }
         finally
@@ -1749,25 +1695,23 @@ public sealed class DynamicTableViewUiTests
     }
 
     [AvaloniaFact]
-    public void Resizing_between_star_and_cells_resizes_star_column()
+    public void Resizing_between_star_and_auto_resizes_star_column()
     {
-        // Scenario: first column is Star, second is Cells
-        // User resizes the divider between Star and Cells
+        // Scenario: first column is Star, followed by native Auto columns.
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> star = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "star", "Star", static row => row.Name);
-        star.WidthMode = DynamicTableViewWidthMode.Star;
-        star.Width = 1;
+        star.Width = new GridLength(1, GridUnitType.Star);
         star.MinWidth = 80;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> cells = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "cells", "Cells", static row => row.Name);
-        cells.WidthMode = DynamicTableViewWidthMode.Cells;
+        cells.Width = GridLength.Auto;
         cells.MinWidth = 100;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> header = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "header", "Header", static row => row.Name);
-        header.WidthMode = DynamicTableViewWidthMode.Header;
+        header.Width = GridLength.Auto;
         header.MinWidth = 100;
 
         using var source = DynamicTableViewTestData.CreateSource(cache, [star, cells, header]);
@@ -1780,7 +1724,7 @@ public sealed class DynamicTableViewUiTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
 
-            // Get the Star column header (index 0) - its grip is the divider between Star and Cells
+            // Get the Star column header (index 0) - its grip is the divider before the Auto columns.
             var starHeader = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
                 .Single(candidate => ReferenceEquals(candidate.Column, table.Columns[0]));
             var resizeGrip = Assert.Single(starHeader.GetVisualDescendants().OfType<Thumb>(),
@@ -1793,8 +1737,6 @@ public sealed class DynamicTableViewUiTests
             Point resizeEnd = new(resizeStart.X + 30, resizeStart.Y); // Drag right to widen
 
             double initialStarWidth = table.Columns[0].ActualWidth;
-            double initialCellsWidth = table.Columns[1].ActualWidth;
-            double initialHeaderWidth = table.Columns[2].ActualWidth;
 
             window.MouseDown(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
@@ -1805,14 +1747,13 @@ public sealed class DynamicTableViewUiTests
 
             // The Star column (index 0) should widen
             Assert.True(table.Columns[0].ActualWidth > initialStarWidth,
-                "Dragging right on the divider between Star and Cells should widen the Star column.");
+                "Dragging right on the divider before Auto should widen the Star column.");
             
-            // Cells and Header columns should remain unchanged
-            Assert.Equal(initialCellsWidth, table.Columns[1].ActualWidth, precision: 1);
-            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+            Assert.Equal(GridUnitType.Auto, table.Columns[1].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Auto, table.Columns[2].Width.GridUnitType);
 
             // The Star column should now be in Pixel mode (manually sized)
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, source.Columns[0].Width.GridUnitType);
             Assert.Equal(GridUnitType.Pixel, table.Columns[0].Width.GridUnitType);
         }
         finally
@@ -1829,19 +1770,17 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> firstStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "first-star", "First Star", static row => row.Name);
-        firstStar.WidthMode = DynamicTableViewWidthMode.Star;
-        firstStar.Width = 1;
+        firstStar.Width = new GridLength(1, GridUnitType.Star);
         firstStar.MinWidth = 80;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> secondStar = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "second-star", "Second Star", static row => row.Id);
-        secondStar.WidthMode = DynamicTableViewWidthMode.Star;
-        secondStar.Width = 2;
+        secondStar.Width = new GridLength(2, GridUnitType.Star);
         secondStar.MinWidth = 80;
 
         DynamicTableViewColumn<DynamicTableViewTestRow> headerColumn = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "header", "Header", static row => row.Name);
-        headerColumn.WidthMode = DynamicTableViewWidthMode.Header;
+        headerColumn.Width = GridLength.Auto;
         headerColumn.MinWidth = 100;
 
         using var source = DynamicTableViewTestData.CreateSource(cache, [firstStar, secondStar, headerColumn]);
@@ -1869,7 +1808,6 @@ public sealed class DynamicTableViewUiTests
 
             double initialFirstStarWidth = table.Columns[0].ActualWidth;
             double initialSecondStarWidth = table.Columns[1].ActualWidth;
-            double initialHeaderWidth = table.Columns[2].ActualWidth;
 
             window.MouseDown(resizeStart, MouseButton.Left);
             Dispatcher.UIThread.RunJobs();
@@ -1882,14 +1820,13 @@ public sealed class DynamicTableViewUiTests
                 "Dragging right on the right side of the second Star divider should also widen the second Star column.");
             Assert.True(table.Columns[0].ActualWidth < initialFirstStarWidth);
             
-            // Header column should remain unchanged
-            Assert.Equal(initialHeaderWidth, table.Columns[2].ActualWidth, precision: 1);
+            Assert.Equal(GridUnitType.Auto, table.Columns[2].Width.GridUnitType);
 
             // The second Star column should now be in Pixel mode (manually sized)
-            Assert.Equal(DynamicTableViewWidthMode.Pixel, source.Columns[1].WidthMode);
+            Assert.Equal(GridUnitType.Pixel, source.Columns[1].Width.GridUnitType);
             Assert.Equal(GridUnitType.Pixel, table.Columns[1].Width.GridUnitType);
             
-            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, source.Columns[0].Width.GridUnitType);
             Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
         }
         finally
@@ -1904,12 +1841,10 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "first", "First", static row => row.Name);
-        first.WidthMode = DynamicTableViewWidthMode.Star;
-        first.Width = 1;
+        first.Width = new GridLength(1, GridUnitType.Star);
         DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "second", "Second", static row => row.Id);
-        second.WidthMode = DynamicTableViewWidthMode.Star;
-        second.Width = 1;
+        second.Width = new GridLength(1, GridUnitType.Star);
         using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = false };
         Window window = new() { Width = 640, Height = 320, Content = table };
@@ -1931,116 +1866,9 @@ public sealed class DynamicTableViewUiTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.False(table.CanUserResizeColumns);
-            Assert.Equal(DynamicTableViewWidthMode.Star, source.Columns[0].WidthMode);
+            Assert.Equal(GridUnitType.Star, source.Columns[0].Width.GridUnitType);
             Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
             Assert.Equal(1, table.Columns[0].Width.Value);
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
-    [AvaloniaFact]
-    public void Auto_width_grows_from_realized_cells_and_honors_header_and_pixel_modes()
-    {
-        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
-        var automatic = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "name", "Name", static row => row.Name);
-        automatic.WidthMode = DynamicTableViewWidthMode.Auto;
-        automatic.MinWidth = 30;
-        var headerOnly = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "id", "Id", static row => row.Id);
-        headerOnly.WidthMode = DynamicTableViewWidthMode.Header;
-        headerOnly.MinWidth = 30;
-        var fixedWidth = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "age", "Age", static row => row.Age);
-        fixedWidth.WidthMode = DynamicTableViewWidthMode.Pixel;
-        fixedWidth.Width = 123;
-        fixedWidth.MinWidth = 30;
-        using var source = DynamicTableViewTestData.CreateSource(cache, [automatic, headerOnly, fixedWidth]);
-        var item = DynamicTableViewTestData.CreateRows()[0] with { Id = new string('I', 80), Name = "Short" };
-        cache.AddOrUpdate(item);
-        DynamicTableView table = new() { Source = source };
-        Window window = new() { Width = 700, Height = 260, Content = table };
-
-        try
-        {
-            window.Show();
-            Dispatcher.UIThread.RunJobs();
-            var initialAutoWidth = table.Columns[0].ActualWidth;
-
-            cache.AddOrUpdate(item with { Name = new string('W', 80) });
-            Dispatcher.UIThread.RunJobs();
-            Dispatcher.UIThread.RunJobs();
-
-            Assert.True(table.Columns[0].ActualWidth > initialAutoWidth);
-            Assert.True(table.Columns[0].ActualWidth > table.Columns[1].ActualWidth);
-            Assert.Equal(123, table.Columns[2].ActualWidth);
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
-    [AvaloniaFact]
-    public void Auto_width_measures_longer_text_in_cells_that_fit_the_current_width()
-    {
-        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
-        DynamicTableViewColumn<DynamicTableViewTestRow> automatic = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "name", "Name", static row => row.Name);
-        automatic.WidthMode = DynamicTableViewWidthMode.Auto;
-        automatic.MinWidth = 30;
-        using var source = DynamicTableViewTestData.CreateSource(cache, [automatic]);
-        DynamicTableViewTestRow[] rows = DynamicTableViewTestData.CreateRows();
-        cache.AddOrUpdate(new[]
-        {
-            rows[0] with { Id = "short", Name = "A" },
-            rows[1] with { Id = "long", Name = new string('W', 60) }
-        });
-        DynamicTableView table = new() { Source = source };
-        Window window = new() { Width = 700, Height = 260, Content = table };
-
-        try
-        {
-            window.Show();
-            Dispatcher.UIThread.RunJobs();
-            Dispatcher.UIThread.RunJobs();
-
-            Assert.True(table.Columns[0].ActualWidth > 100);
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
-    [AvaloniaFact]
-    public void Changing_the_only_pixel_column_to_auto_starts_measuring_on_next_layout()
-    {
-        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
-        var column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
-            "name", "Name", static row => row.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = 80;
-        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
-        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0] with { Name = new string('W', 100) });
-        DynamicTableView table = new() { Source = source };
-        Window window = new() { Width = 900, Height = 260, Content = table };
-
-        try
-        {
-            window.Show();
-            Dispatcher.UIThread.RunJobs();
-            Assert.Equal(80, table.Columns[0].ActualWidth);
-
-            column.WidthMode = DynamicTableViewWidthMode.Auto;
-            window.Height += 10;
-            Dispatcher.UIThread.RunJobs();
-            Dispatcher.UIThread.RunJobs();
-
-            Assert.True(table.Columns[0].ActualWidth > 80);
         }
         finally
         {
@@ -2060,8 +1888,7 @@ public sealed class DynamicTableViewUiTests
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows());
         foreach (var column in source.Columns)
         {
-            column.WidthMode = DynamicTableViewWidthMode.Pixel;
-            column.Width = 120 + 10 * source.Columns.IndexOf(column);
+            column.Width = new GridLength(120 + 10 * source.Columns.IndexOf(column));
         }
         var expected = source.Columns.ToList();
         var moved = expected[from];
@@ -2118,7 +1945,7 @@ public sealed class DynamicTableViewUiTests
         {
             Assert.Equal(expected, source.Columns);
             Assert.Equal(expected, table.Columns.Select(column => column.Header));
-            Assert.Equal(expected.Select(column => column.Width), table.Columns.Select(column => column.Width.Value));
+            Assert.Equal(expected.Select(column => column.Width), table.Columns.Select(column => column.Width));
             var headers = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
                 .OrderBy(header => header.TranslatePoint(default, table)!.Value.X).ToArray();
             Assert.Equal(expected, headers.Select(header => header.Column!.Header));
@@ -2436,8 +2263,7 @@ public sealed class DynamicTableViewUiTests
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
-        column.WidthMode = DynamicTableViewWidthMode.Pixel;
-        column.Width = column.MinWidth;
+        column.Width = new GridLength(column.MinWidth);
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         DynamicTableView table = new() { Source = source };
         Window window = new() { Width = 240, Height = 240, Content = table };

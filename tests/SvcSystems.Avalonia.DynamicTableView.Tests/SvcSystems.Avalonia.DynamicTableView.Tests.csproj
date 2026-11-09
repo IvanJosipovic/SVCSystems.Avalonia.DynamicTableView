@@ -10,8 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.1.5" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.CrashDump" Version="2.5.2" />
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" Version="2.5.2" />
@@ -20,7 +20,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\samples\SvcSystems.Avalonia.DynamicTableView.Sample\SvcSystems.Avalonia.DynamicTableView.Sample.csproj" />
     <ProjectReference Include="..\..\src\SvcSystems.Avalonia.DynamicTableView\SvcSystems.Avalonia.DynamicTableView.csproj" />
   </ItemGroup>
 

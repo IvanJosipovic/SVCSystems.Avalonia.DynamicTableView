@@ -9,7 +9,7 @@ A read-only Avalonia table backed by DynamicData, with typed column selectors an
 ## Features
 
 - Sort, filter, search, resize, and reorder columns.
-- Choose automatic, header, cell, pixel, or proportional star column sizing.
+- Choose native Avalonia `GridLength` sizing: Auto (a 1* share in `TableView`), pixel, or weighted Star. Widths do not fit header or cell content.
 - Preserve selection and capture or restore column layout, filters, sorting, and scroll position.
 - Customize cell templates, text wrapping, grid lines, and column minimum widths.
 - Use typed selectors without reflection-based row discovery.
@@ -65,9 +65,11 @@ Configure column sizing and table appearance in code:
 
 ```csharp
 using Avalonia.Media;
+using Avalonia.Controls;
 
-columns[0].WidthMode = DynamicTableViewWidthMode.Star;
+columns[0].Width = new GridLength(1, GridUnitType.Star);
 columns[0].MinWidth = 120;
+columns[0].MaxWidth = 360;
 columns[0].CellTextWrapping = TextWrapping.Wrap;
 
 table.GridLinesVisibility = DynamicTableViewGridLinesVisibility.All;
@@ -76,7 +78,7 @@ table.CellMaxLines = 3;
 
 Column text options override table defaults for cells without a custom `CellTemplate`. Use `CellMaxLines = 0` for unlimited lines.
 
-To set a minimum width from a style, assign a class before the column is added to the table:
+To override a column's minimum or maximum width from a style, assign a class before the column is added to the table:
 
 ```csharp
 columns[0].Classes.Add("wide-column");
@@ -85,16 +87,18 @@ var source = new DynamicTableViewSource<Person, string>(
 var table = new DynamicTableView { Source = source };
 ```
 
-Apply the class before assigning `Source`; the table copies column classes when it creates its native columns.
+Column classes are copied to the native columns and stay synchronized when changed while the table is attached. Changes made while detached are applied when it reattaches.
 
 ```xml
-<Style xmlns:dyn="using:SvcSystems.Avalonia.DynamicTableView"
-       Selector="TableViewColumn.wide-column">
-  <Setter Property="dyn:DynamicTableViewColumnProperties.MinWidth" Value="120" />
+<Style Selector="TableViewColumn.wide-column">
+  <Setter Property="MinWidth" Value="120" />
+  <Setter Property="MaxWidth" Value="360" />
 </Style>
 ```
 
-The styled minimum takes precedence over the column's `MinWidth`; without one, the column value is used.
+Native `TableViewColumn` style values take precedence over `DynamicTableViewColumn.MinWidth` and `MaxWidth` metadata.
+
+Column widths use Avalonia `GridLength`: `GridLength.Auto` (the default) participates as a `1*` share in `TableView`, `new GridLength(120)` sets a pixel width, and `new GridLength(2, GridUnitType.Star)` sets a weighted share. Width is not measured to fit header or cell text.
 
 ## Save And Restore
 
