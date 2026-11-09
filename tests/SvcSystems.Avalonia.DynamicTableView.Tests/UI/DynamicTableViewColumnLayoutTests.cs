@@ -12,7 +12,7 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class DynamicTableViewColumnLayoutTests
 {
     [AvaloniaFact]
-    public void Style_can_set_a_column_minimum_width()
+    public void Native_style_can_set_column_minimum_and_maximum_widths()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
@@ -21,15 +21,20 @@ public sealed class DynamicTableViewColumnLayoutTests
         column.WidthMode = DynamicTableViewWidthMode.Pixel;
         column.Width = 80;
         column.MinWidth = 40;
+        column.MaxWidth = 500;
         column.Classes.Add("wide-minimum");
         using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
         DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
         Window window = new() { Width = 600, Height = 300, Content = table };
 
-        // A style, not the column metadata, supplies the minimum.
+        // Native style values override the DynamicTableView column metadata.
         Style style = new(static x => x.OfType<TableViewColumn>().Class("wide-minimum"))
         {
-            Setters = { new Setter(DynamicTableViewColumnProperties.MinWidthProperty, 200.0) }
+            Setters =
+            {
+                new Setter(TableViewColumn.MinWidthProperty, 200.0),
+                new Setter(TableViewColumn.MaxWidthProperty, 250.0)
+            }
         };
         window.Styles.Add(style);
 
@@ -38,13 +43,17 @@ public sealed class DynamicTableViewColumnLayoutTests
             window.Show();
             Dispatcher.UIThread.RunJobs();
 
-            // The style is applied when the column attaches, so the initial width already honours it.
+            // Direct native limits are styleable and override metadata fallbacks.
+            Assert.Equal(200, table.Columns[0].MinWidth);
+            Assert.Equal(250, table.Columns[0].MaxWidth);
             Assert.Equal(200, table.Columns[0].Width.Value);
             Assert.Equal(200, table.CaptureState().Columns[0].Width);
 
-            // The styled minimum also clamps a resize, which is the behavior the metadata used to own.
+            // Both native limits clamp the custom resize interaction.
             table.ResizeColumnAtDivider("name", -500);
             Assert.Equal(200, table.Columns[0].Width.Value);
+            table.ResizeColumnAtDivider("name", 500);
+            Assert.Equal(250, table.Columns[0].Width.Value);
         }
         finally
         {
@@ -168,6 +177,149 @@ public sealed class DynamicTableViewColumnLayoutTests
             Assert.Equal(150, table.Columns[0].Width.Value);
             table.ResizeColumnAtDivider("name", -500);
             Assert.Equal(150, table.Columns[0].Width.Value);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Metadata_maximum_clamps_pixel_width_resize_and_restored_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Pixel;
+        column.Width = 400;
+        column.MinWidth = 100;
+        column.MaxWidth = 180;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source, CanUserResizeColumns = true };
+        Window window = new() { Width = 600, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(180, table.Columns[0].Width.Value);
+
+            table.ResizeColumnAtDivider("name", 500);
+            Assert.Equal(180, table.Columns[0].Width.Value);
+
+            column.MaxWidth = 140;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(140, table.Columns[0].Width.Value);
+
+            table.RestoreState(new DynamicTableViewState(
+                [new("name", 0, 500, DynamicTableViewWidthMode.Pixel)],
+                [],
+                []));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(140, table.Columns[0].Width.Value);
+            Assert.Equal(140, table.CaptureState().Columns[0].Width);
+
+            // Avalonia's documented conflict rule is minimum wins.
+            column.MinWidth = 160;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(160, table.Columns[0].Width.Value);
+            Assert.Equal(160, table.Columns[0].ActualWidth);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Maximum_width_clamps_custom_auto_measurement()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "A deliberately long header which must be clamped", static row => row.Name);
+        column.WidthMode = DynamicTableViewWidthMode.Header;
+        column.MinWidth = 40;
+        column.MaxWidth = 120;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 600, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(120, table.Columns[0].Width.Value);
+            Assert.Equal(120, table.Columns[0].ActualWidth);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Native_star_layout_enforces_and_redistributes_maximum_width()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> capped = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "capped", "Capped", static row => row.Name);
+        capped.WidthMode = DynamicTableViewWidthMode.Star;
+        capped.MaxWidth = 180;
+        DynamicTableViewColumn<DynamicTableViewTestRow> remaining = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "remaining", "Remaining", static row => row.Name);
+        remaining.WidthMode = DynamicTableViewWidthMode.Star;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [capped, remaining]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 900, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
+            Assert.Equal(180, table.Columns[0].ActualWidth);
+            Assert.True(table.Columns[1].ActualWidth > table.Columns[0].ActualWidth);
+
+            double previousRemainingWidth = table.Columns[1].ActualWidth;
+            capped.MaxWidth = 120;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(120, table.Columns[0].ActualWidth);
+            Assert.True(table.Columns[1].ActualWidth > previousRemainingWidth);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Native_star_layout_leaves_unused_space_when_every_column_reaches_its_maximum()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        first.WidthMode = DynamicTableViewWidthMode.Star;
+        first.MaxWidth = 120;
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Name);
+        second.WidthMode = DynamicTableViewWidthMode.Star;
+        second.MaxWidth = 180;
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 900, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(120, table.Columns[0].ActualWidth);
+            Assert.Equal(180, table.Columns[1].ActualWidth);
+            Assert.True(table.Columns.Sum(static column => column.ActualWidth) < window.Width);
         }
         finally
         {
@@ -423,9 +575,21 @@ public sealed class DynamicTableViewColumnLayoutTests
         DynamicTableView table = new() { Source = source };
         Window window = new() { Width = 900, Height = 300, Content = table };
 
-        // Every width the star pass applies must already respect the minimum. A pass that writes
-        // a too-small width and corrects it on the next frame is what the user sees as a flash.
+        // Native Star widths stay as Star values; the TableView allocator applies constrained
+        // ActualWidths directly, without the former custom pixel-width correction pass.
         var appliedBelowMinimum = new List<double>();
+        foreach (TableViewColumn native in table.Columns)
+        {
+            DynamicTableViewColumn definition = (DynamicTableViewColumn)native.Header!;
+            native.PropertyChanged += (_, args) =>
+            {
+                if (args.Property != TableViewColumn.ActualWidthProperty)
+                    return;
+                double actualWidth = args.GetNewValue<double>();
+                if (double.IsFinite(actualWidth) && actualWidth < definition.MinWidth)
+                    appliedBelowMinimum.Add(actualWidth);
+            };
+        }
 
         try
         {
@@ -437,16 +601,8 @@ public sealed class DynamicTableViewColumnLayoutTests
                 window.Width = width;
                 Dispatcher.UIThread.RunJobs();
 
-                foreach (TableViewColumn column in table.Columns)
-                {
-                    if (column.Header is not DynamicTableViewColumn definition)
-                        continue;
-                    if (column.Width.GridUnitType != GridUnitType.Pixel)
-                        continue;
-                    if (column.Width.Value < definition.MinWidth)
-                        appliedBelowMinimum.Add(column.Width.Value);
-                }
-
+                Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+                Assert.Equal(GridUnitType.Star, table.Columns[1].Width.GridUnitType);
                 Assert.True(table.Columns[0].ActualWidth >= first.MinWidth);
                 Assert.True(table.Columns[1].ActualWidth >= second.MinWidth);
             }
@@ -493,7 +649,7 @@ public sealed class DynamicTableViewColumnLayoutTests
     }
 
     [AvaloniaFact]
-    public void Star_column_reapplies_its_minimum_after_an_external_native_width_change()
+    public void Star_column_restores_its_native_star_width_after_an_external_width_change()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
         cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
@@ -513,7 +669,9 @@ public sealed class DynamicTableViewColumnLayoutTests
             table.Columns[0].Width = new GridLength(20);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.True(table.Columns[0].Width.Value >= star.MinWidth);
+            Assert.Equal(GridUnitType.Star, table.Columns[0].Width.GridUnitType);
+            Assert.Equal(1, table.Columns[0].Width.Value);
+            Assert.True(table.Columns[0].ActualWidth >= star.MinWidth);
         }
         finally
         {

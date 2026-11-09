@@ -19,6 +19,7 @@ public abstract class DynamicTableViewColumn
     private DynamicTableViewWidthMode _widthMode = DynamicTableViewWidthMode.Auto;
     private double _width = 1;
     private double _minWidth = 40;
+    private double _maxWidth = double.PositiveInfinity;
 
     /// <summary>Creates column metadata.</summary>
     protected DynamicTableViewColumn(string key, object header, Type valueType, IDataTemplate? cellTemplate)
@@ -40,8 +41,8 @@ public abstract class DynamicTableViewColumn
     /// </summary>
     /// <remarks>
     /// Classes are copied to the native column before it attaches to the table, so styles that
-    /// target them take effect. Use them to style individual columns, for example to set
-    /// <see cref="DynamicTableViewColumnProperties.MinWidthProperty"/>.
+    /// target them take effect. Use them to style individual columns, including the native
+    /// <see cref="TableViewColumn.MinWidth"/> and <see cref="TableViewColumn.MaxWidth"/> properties.
     /// </remarks>
     public Classes Classes { get; } = [];
 
@@ -150,7 +151,7 @@ public abstract class DynamicTableViewColumn
         }
     }
 
-    /// <summary>Gets or sets minimum width. Changing it re-applies the sizing of this column and of attached Star columns.</summary>
+    /// <summary>Gets or sets minimum width. Changing it re-applies this column's sizing and updates attached tables.</summary>
     public double MinWidth
     {
         get => _minWidth;
@@ -161,6 +162,29 @@ public abstract class DynamicTableViewColumn
             if (_minWidth.Equals(value))
                 return;
             _minWidth = value;
+            WidthOptionsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets maximum width. Defaults to positive infinity. Changing it reapplies this
+    /// column's sizing and updates attached tables.
+    /// </summary>
+    /// <remarks>
+    /// The value must be non-negative and not NaN. Positive infinity is allowed. If this value is
+    /// less than <see cref="MinWidth"/>, the minimum takes precedence, matching
+    /// <see cref="TableViewColumn.MaxWidth"/>.
+    /// </remarks>
+    public double MaxWidth
+    {
+        get => _maxWidth;
+        set
+        {
+            if (double.IsNaN(value) || value < 0)
+                throw new ArgumentOutOfRangeException(nameof(value), "The maximum width must be non-negative and not NaN.");
+            if (_maxWidth.Equals(value))
+                return;
+            _maxWidth = value;
             WidthOptionsChanged?.Invoke(this, EventArgs.Empty);
         }
     }

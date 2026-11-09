@@ -15,13 +15,20 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class DynamicTableViewColumnResizeRestoreTests
 {
     [AvaloniaFact]
-    public void Native_resize_observer_recovers_after_pointer_crosses_clamped_divider()
+    public void Native_resize_remains_at_minimum_while_pointer_is_inside_the_overshoot()
     {
         DynamicTableViewColumn<DynamicTableViewTestRow> definition = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
             "name", "Name", static row => row.Name);
         definition.WidthMode = DynamicTableViewWidthMode.Star;
         definition.MinWidth = 100;
-        TableViewColumn native = new() { Header = "Name", Width = new GridLength(1, GridUnitType.Star) };
+        definition.MaxWidth = 180;
+        TableViewColumn native = new()
+        {
+            Header = "Name",
+            Width = new GridLength(1, GridUnitType.Star),
+            MinWidth = 100,
+            MaxWidth = 180
+        };
         TableView table = new() { CanUserResizeColumns = true };
         table.Columns.Add(native);
         bool updating = false;
@@ -32,9 +39,7 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             updating = true;
             try
             {
-                double width = Math.Max(definition.MinWidth, native.Width.Value);
-                if (native.Width.Value != width)
-                    native.Width = new GridLength(width);
+                double width = native.Width.Value;
                 definition.WidthMode = DynamicTableViewWidthMode.Pixel;
                 definition.Width = width;
             }
@@ -69,11 +74,12 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
             Point pastMinimum = new(start.X - 270, start.Y);
             window.MouseMove(pastMinimum, RawInputModifiers.LeftMouseButton);
             Dispatcher.UIThread.RunJobs();
-            Assert.True(native.Width.Value > 100);
+            Assert.Equal(100, native.Width.Value);
+            Assert.True(native.Width.Value <= 180);
             Assert.Equal(3, deltas.Count);
             Assert.True(deltas[0] < 0);
             Assert.True(deltas[1] < 0);
-            Assert.True(deltas[2] > 0);
+            Assert.True(deltas[2] < 0);
             Assert.NotNull(captures[0]);
             Assert.Contains(grip.GetVisualDescendants(), visual => ReferenceEquals(visual, captures[0]));
             Assert.All(captures, captured => Assert.Same(captures[0], captured));
@@ -168,6 +174,51 @@ public sealed class DynamicTableViewColumnResizeRestoreTests
         {
             window.Close();
         }
+    }
+
+    [AvaloniaFact]
+    public void Native_table_resize_honors_column_minimum_and_maximum()
+    {
+        TableViewColumn column = new()
+        {
+            Header = "Limited",
+            Width = new GridLength(150),
+            MinWidth = 100,
+            MaxWidth = 180
+        };
+        TableView table = new() { CanUserResizeColumns = true };
+        table.Columns.Add(column);
+        Window window = new() { Width = 500, Height = 300, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            DragNativeColumn(window, table, column, 500);
+            Assert.Equal(180, column.Width.Value);
+
+            DragNativeColumn(window, table, column, -500);
+            Assert.Equal(100, column.Width.Value);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static void DragNativeColumn(Window window, TableView table, TableViewColumn column, double deltaX)
+    {
+        TableViewColumnHeader header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+            .Single(candidate => ReferenceEquals(candidate.Column, column));
+        Thumb grip = Assert.Single(header.GetVisualDescendants().OfType<Thumb>(), candidate => candidate.Name == "PART_Resizer");
+        Point start = grip.TranslatePoint(new Point(grip.Bounds.Width / 2, grip.Bounds.Height / 2), window)!.Value;
+        Point end = new(start.X + deltaX, start.Y);
+        window.MouseDown(start, MouseButton.Left);
+        window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+        Dispatcher.UIThread.RunJobs();
+        window.MouseUp(end, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
     }
 
     [AvaloniaFact]

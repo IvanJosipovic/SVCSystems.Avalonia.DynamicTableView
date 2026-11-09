@@ -42,18 +42,12 @@ public sealed partial class DynamicTableView : TableView
     private readonly Dictionary<string, double> _cellSamples = new(StringComparer.Ordinal);
     private readonly HashSet<DynamicTableViewColumn> _observedWidthColumns = new(ReferenceEqualityComparer.Instance);
     private bool _applyingWidthMetadata;
+    private bool _applyingNativeColumnValues;
     private readonly TextMeasurer _textMeasurer = new();
     private IReadOnlyList<DynamicTableViewSortDescriptor> _headerSorts = [];
     private IReadOnlyList<DynamicTableViewFilterDescriptor> _headerFilters = [];
     private IDynamicTableViewSource? _attachedSource;
     private bool _autoWidthPassQueued;
-    private bool _starWidthPassQueued;
-    private bool _columnSizingInvalidated = true;
-    private readonly Action _runStarWidthPass;
-    private GridLength[] _starWidthBuffer = [];
-    private (double Viewport, int Columns, int Revision) _lastStarWidthKey;
-    private int _widthRevision;
-    private bool _applyingStarWidths;
     private ScrollViewer? _scrollViewer;
     private bool _headerRefreshQueued;
     private bool _restoringState;
@@ -74,7 +68,6 @@ public sealed partial class DynamicTableView : TableView
     /// <summary>Creates an empty dynamic table.</summary>
     public DynamicTableView()
     {
-        _runStarWidthPass = FlushStarColumnWidths;
         _resizeHeaders = new ResizeHeaderCache(this, IsKnownColumnKey);
         _resize = new ColumnResizeController(
             () => CanUserResizeColumns && Source is not null,
@@ -199,7 +192,6 @@ public sealed partial class DynamicTableView : TableView
         // Metadata can change while detached, when there is no attached table to notify.
         ApplyWidthMetadataToNativeColumns();
         LayoutUpdated += OnLayoutUpdated;
-        InvalidateColumnSizing();
         QueueHeaderRefresh();
         QueueAutoWidthPass();
         QueueScrollRestore();
@@ -292,8 +284,6 @@ public sealed partial class DynamicTableView : TableView
         if (sender is not DynamicTableViewColumn definition || _applyingWidthMetadata)
             return;
         ApplyWidthMetadata(definition);
-        InvalidateColumnSizing();
-        FlushColumnSizing();
         QueueAutoWidthPass();
     }
 
@@ -311,12 +301,33 @@ public sealed partial class DynamicTableView : TableView
     {
         // An explicit metadata change supersedes any width captured by a resize gesture.
         _manuallySizedColumns.Remove(definition.Key);
-        _widthRevision++;
         if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
             return;
-        GridLength width = GetInitialWidth(definition, GetEffectiveMinWidth(definition, native));
-        if (native.Width != width)
-            native.Width = width;
+
+        _applyingNativeColumnValues = true;
+        try
+        {
+            ApplyNativeColumnLimits(definition, native);
+            GridLength width = GetInitialWidth(
+                definition,
+                GetEffectiveMinWidth(definition, native),
+                GetEffectiveMaxWidth(definition, native));
+            if (native.Width != width)
+                native.Width = width;
+        }
+        finally
+        {
+            _applyingNativeColumnValues = false;
+        }
+    }
+
+    /// <summary>Sets metadata limits below application styles so native TableView owns the effective limits.</summary>
+    private static void ApplyNativeColumnLimits(DynamicTableViewColumn definition, TableViewColumn native)
+    {
+        // Template priority is lower than Style priority. This supplies the metadata fallback while
+        // allowing direct TableViewColumn MinWidth/MaxWidth setters to override it.
+        native.SetValue(TableViewColumn.MinWidthProperty, definition.MinWidth, BindingPriority.Template);
+        native.SetValue(TableViewColumn.MaxWidthProperty, definition.MaxWidth, BindingPriority.Template);
     }
 
     /// <summary>Applies width metadata without re-entering the change handler.</summary>
@@ -373,7 +384,6 @@ public sealed partial class DynamicTableView : TableView
         if (_restoringState)
             return;
         _resizeHeaders.Invalidate();
-        _widthRevision++;
 
         if (Source is null || e.Action == NotifyCollectionChangedAction.Reset)
         {
@@ -414,13 +424,11 @@ public sealed partial class DynamicTableView : TableView
         }
         _resizeHeaders.Invalidate();
         SynchronizeWidthOptionsSubscriptions();
-        InvalidateColumnSizing();
         QueueAutoWidthPass();
     }
 
     private void RebuildNativeColumns()
     {
-        _widthRevision++;
         foreach (TableViewColumn discarded in _nativeColumns.Values)
             discarded.PropertyChanged -= NativeColumnOnPropertyChanged;
         _nativeColumns.Clear();
@@ -451,38 +459,46 @@ public sealed partial class DynamicTableView : TableView
             HeaderTemplate = CreateHeaderTemplate(),
             CanUserResize = false,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Width = ColumnWidthCalculator.GetInitialWidth(definition, definition.MinWidth),
+            Width = ColumnWidthCalculator.GetInitialWidth(definition, definition.MinWidth, definition.MaxWidth),
             CellTemplate = new FuncDataTemplate<object>((_, _) => new DynamicTableViewCell(this, definition), supportsRecycling: true)
         };
 
-        // Style classes are applied before the column attaches, so styles that target them
-        // (for example to set DynamicTableViewColumnProperties.MinWidth) take effect.
+        // Style classes are applied before the column attaches so native limit styles take effect.
         foreach (var styleClass in definition.Classes)
             native.Classes.Add(styleClass);
-        // A style can set the minimum after the initial width was applied, so follow the property.
         native.PropertyChanged += NativeColumnOnPropertyChanged;
+        _applyingNativeColumnValues = true;
+        try
+        {
+            ApplyNativeColumnLimits(definition, native);
+            native.Width = GetInitialWidth(
+                definition,
+                GetEffectiveMinWidth(definition, native),
+                GetEffectiveMaxWidth(definition, native));
+        }
+        finally
+        {
+            _applyingNativeColumnValues = false;
+        }
         return native;
     }
 
-    /// <summary>Reapplies column sizing when a style or the caller changes a column's width or minimum.</summary>
+    /// <summary>Reapplies column sizing when a style or the caller changes a column's limits or width.</summary>
     private void NativeColumnOnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (sender is not TableViewColumn { Header: DynamicTableViewColumn definition })
+        if (_applyingNativeColumnValues || sender is not TableViewColumn { Header: DynamicTableViewColumn definition } native)
             return;
 
         if (e.Property == TableViewColumn.IsVisibleProperty)
         {
-            _widthRevision++;
-            InvalidateColumnSizing();
+            QueueAutoWidthPass();
             return;
         }
 
-        if (e.Property == DynamicTableViewColumnProperties.MinWidthProperty)
+        if (e.Property == TableViewColumn.MinWidthProperty ||
+            e.Property == TableViewColumn.MaxWidthProperty)
         {
-            // A styled minimum changes the star result directly, so apply it before the next frame.
             ApplyWidthMetadata(definition);
-            InvalidateColumnSizing();
-            FlushColumnSizing();
             QueueAutoWidthPass();
             return;
         }
@@ -490,14 +506,25 @@ public sealed partial class DynamicTableView : TableView
         if (e.Property != TableViewColumn.WidthProperty)
             return;
 
-        // A fixed column's realized width is an input to the star budget. Only an external write
-        // matters; the star pass's own writes are already reflected in the cached key, so ignoring
-        // them here keeps the pass from re-queueing itself every frame.
-        if (_applyingStarWidths)
-            return;
+        // Star width metadata is authoritative: an external write must not silently replace the
+        // weight with a pixel width. User resizing changes the metadata to Pixel before writing.
+        if (definition.WidthMode == DynamicTableViewWidthMode.Star)
+        {
+            _applyingNativeColumnValues = true;
+            try
+            {
+                native.Width = GetInitialWidth(
+                    definition,
+                    GetEffectiveMinWidth(definition, native),
+                    GetEffectiveMaxWidth(definition, native));
+            }
+            finally
+            {
+                _applyingNativeColumnValues = false;
+            }
+        }
 
-        _widthRevision++;
-        InvalidateColumnSizing();
+        QueueAutoWidthPass();
     }
 
     private IDataTemplate CreateHeaderTemplate()
@@ -525,12 +552,15 @@ public sealed partial class DynamicTableView : TableView
         }, DispatcherPriority.Loaded);
     }
 
-    private static GridLength GetInitialWidth(DynamicTableViewColumn definition, double minWidth)
-        => ColumnWidthCalculator.GetInitialWidth(definition, minWidth);
+    private static GridLength GetInitialWidth(DynamicTableViewColumn definition, double minWidth, double maxWidth)
+        => ColumnWidthCalculator.GetInitialWidth(definition, minWidth, maxWidth);
 
     /// <summary>Resolves the minimum width, preferring a styled value over the column metadata.</summary>
     private static double GetEffectiveMinWidth(DynamicTableViewColumn definition, TableViewColumn? native)
         => ColumnWidthCalculator.GetEffectiveMinWidth(definition, native);
+
+    private static double GetEffectiveMaxWidth(DynamicTableViewColumn definition, TableViewColumn? native)
+        => ColumnWidthCalculator.GetEffectiveMaxWidth(definition, native);
 
     private void UpdateHeaderStates()
     {
@@ -571,7 +601,7 @@ public sealed partial class DynamicTableView : TableView
     private bool IsKnownColumnKey(string key)
         => Source is { } source && IndexOfColumn(source.Columns, key) >= 0;
 
-    /// <summary>Resizes a column by <paramref name="deltaX"/>, clamped to its effective minimum width.</summary>
+    /// <summary>Resizes a column by <paramref name="deltaX"/>, clamped to its effective width limits.</summary>
     /// <remarks>This is the same operation a divider drag performs.</remarks>
     internal void ResizeColumnAtDivider(string headerKey, double deltaX)
     {
@@ -590,10 +620,12 @@ public sealed partial class DynamicTableView : TableView
         double currentWidth = native.Width.GridUnitType == GridUnitType.Pixel
             ? native.Width.Value
             : native.ActualWidth;
-        double newWidth = Math.Max(GetEffectiveMinWidth(definition, native), currentWidth + deltaX);
+        double newWidth = ColumnWidthCalculator.ClampWidth(
+            currentWidth + deltaX,
+            GetEffectiveMinWidth(definition, native),
+            GetEffectiveMaxWidth(definition, native));
         _manuallySizedColumns.Add(definition.Key);
         SetColumnWidthMetadata(definition, DynamicTableViewWidthMode.Pixel, newWidth);
-        _widthRevision++;
         native.Width = new GridLength(newWidth);
     }
 
@@ -602,110 +634,10 @@ public sealed partial class DynamicTableView : TableView
 
     private void OnLayoutUpdated(object? sender, EventArgs e)
     {
-        FlushColumnSizing();
         _resizeHeaders.RefreshIfDirty();
         TryRestorePendingScrollOffset();
         QueueAutoWidthPass();
     }
-
-    /// <summary>Marks the star layout as needing a recompute on the next layout pass.</summary>
-    /// <remarks>
-    /// Every mutation that can change a star width or a minimum must call this. The pass itself is
-    /// coalesced and skipped when its inputs are unchanged, so a scroll frame costs one comparison
-    /// instead of a full redistribution.
-    /// </remarks>
-    private void InvalidateColumnSizing()
-    {
-        _columnSizingInvalidated = true;
-        QueueColumnSizing();
-    }
-
-    /// <summary>Queues one coalesced star-width pass for the current frame.</summary>
-    private void QueueColumnSizing()
-    {
-        if (_starWidthPassQueued || _columnSizingInvalidated is false || Source is null || VisualRoot is null)
-            return;
-
-        _starWidthPassQueued = true;
-        Dispatcher.UIThread.Post(_runStarWidthPass, DispatcherPriority.Render);
-    }
-
-    /// <summary>
-    /// Recomputes every star column width and applies the result in a single write pass.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The result is computed completely before any width is written. Writing as each column is
-    /// resolved would let a column be arranged below its minimum for one frame and then snap back
-    /// to the minimum, which the user sees as a flash.
-    /// </para>
-    /// <para>
-    /// The key comparison happens on every layout pass, because the viewport and the realized
-    /// width of fixed columns are inputs that change without any invalidation call. Only the
-    /// redistribution and the writes are skipped, which is the expensive part.
-    /// </para>
-    /// </remarks>
-    private void FlushStarColumnWidths()
-    {
-        _starWidthPassQueued = false;
-        if (Source is null || VisualRoot is null)
-            return;
-
-        double availableWidth = FindScrollViewer()?.Viewport.Width ?? Bounds.Width;
-        if (!double.IsFinite(availableWidth) || availableWidth <= 0)
-            return;
-
-        // The star result depends on the budget left after fixed columns take their realized
-        // width, the column composition, and the width metadata revision. Scrolling changes
-        // none of them, so a scroll frame only pays for this comparison.
-        double starBudget = StarColumnWidths.ComputeStarBudget(availableWidth, Columns);
-        var key = (starBudget, Columns.Count, _widthRevision);
-        if (key == _lastStarWidthKey)
-        {
-            _columnSizingInvalidated = false;
-            return;
-        }
-
-        if (_starWidthBuffer.Length < Columns.Count)
-            _starWidthBuffer = new GridLength[Columns.Count];
-
-        StarColumnWidths.ComputeWidths(starBudget, Columns, _starWidthBuffer);
-
-        var changed = false;
-        _applyingStarWidths = true;
-        try
-        {
-            for (var index = 0; index < Columns.Count; index++)
-            {
-                TableViewColumn native = Columns[index];
-                if (!native.IsVisible || native.Header is not DynamicTableViewColumn { WidthMode: DynamicTableViewWidthMode.Star })
-                    continue;
-
-                GridLength width = _starWidthBuffer[index];
-                if (native.Width == width)
-                    continue;
-
-                native.Width = width;
-                changed = true;
-            }
-        }
-        finally
-        {
-            _applyingStarWidths = false;
-        }
-
-        _lastStarWidthKey = key;
-        _columnSizingInvalidated = false;
-        if (changed)
-        {
-            // The writes above invalidate layout, so the remaining passes run against the
-            // widths that were just applied rather than the stale ones.
-            _resizeHeaders.Invalidate();
-        }
-    }
-
-    /// <summary>Runs the pending star pass immediately instead of waiting for the next layout pass.</summary>
-    private void FlushColumnSizing() => FlushStarColumnWidths();
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
@@ -810,7 +742,10 @@ public sealed partial class DynamicTableView : TableView
                 : _textMeasurer.Measure(definition.Header.ToString()) + ColumnWidthCalculator.MeasuredTextPadding;
             if ((definition.WidthMode is DynamicTableViewWidthMode.Auto or DynamicTableViewWidthMode.Cells) && _cellSamples.TryGetValue(definition.Key, out var cells))
                 desired = Math.Max(desired, cells);
-            desired = Math.Max(GetEffectiveMinWidth(definition, native), desired);
+            desired = ColumnWidthCalculator.ClampWidth(
+                desired,
+                GetEffectiveMinWidth(definition, native),
+                GetEffectiveMaxWidth(definition, native));
             var currentWidth = native.ActualWidth;
             // Header mode tracks the header text, so it must be able to shrink when the label gets
             // shorter. Auto and Cells only ever grow, so the widest realized row is not lost as
@@ -819,7 +754,17 @@ public sealed partial class DynamicTableView : TableView
                 ? !double.IsFinite(currentWidth) || Math.Abs(desired - currentWidth) > 1
                 : !double.IsFinite(currentWidth) || desired > currentWidth + 1;
             if (shouldApply)
-                native.Width = new GridLength(desired);
+            {
+                _applyingNativeColumnValues = true;
+                try
+                {
+                    native.Width = new GridLength(desired);
+                }
+                finally
+                {
+                    _applyingNativeColumnValues = false;
+                }
+            }
         }
     }
 

@@ -8,17 +8,16 @@ Outcome: all five steps are resolved. The library keeps its `TableView` subclass
 
 ## 1. Evaluate native extension points
 
-Status: Complete. Native grip and minimum-width investigation completed; retain the custom resize path. A real-control native integration is deferred until native resizing can meet the reverse-drag contract. The resulting architectural decision is recorded in section 5.
+Status: The 12.1.6 sizing migration is implemented and covered by headless tests. Avalonia now owns Star min/max allocation; DynamicTableView keeps its custom pointer-resize path because the native grip still cannot reverse within the minimum-width overshoot. Direct native column properties replace the attached minimum-width workaround.
 
-- Compare resize, width layout, header input, reordering, selection, templates, and state against the exact pinned Avalonia version. Done against 12.1.4; see the source comparison below.
-- Prototype native resizing in an isolated test: observe native Width changes and synchronize metadata and state, without modifying unrelated Star columns. Done; see the proof of concept.
-- Test minimum widths, last and single columns, hidden columns, scrolling, capture loss, repeated drags, state restore, and both sample tabs. Compare native grip hit area and interaction with sorting, filtering, and reordering. Done for minimum widths, capture loss, and reverse drags under the native prototype; the equivalent scenarios are covered against the production custom path in section 3.
-- Decide whether native resize can meet the contract. If it cannot, isolate and document the custom interaction boundary and consider an upstream issue or contribution. Do not remove the current implementation until the comparison passes. Decided: it cannot meet the reverse-drag contract; the custom path is retained and its boundary documented.
-- Record the decisions and evidence here; repeat the comparison when upgrading Avalonia. Recorded. Re-running this comparison is a stated trigger in section 5.
+- Historical comparison: resize, width layout, header input, reordering, selection, and templates were compared against 12.1.4; see the source comparison below. Current package references use 12.1.6.
+- Native 12.1.6 MinWidth/MaxWidth, Star redistribution, maximum saturation, viewport overflow, direct style precedence, metadata updates, Auto sizing, restore, and custom resize clamping are covered by headless tests below.
+- Keep the custom pointer interaction. `Native_resize_remains_at_minimum_while_pointer_is_inside_the_overshoot` confirms the 12.1.6 native grip still cannot reverse immediately within that overshoot; `Native_table_resize_honors_column_minimum_and_maximum` confirms the new native bounds work.
+- Re-run the comparison if Avalonia changes TableView sizing or header drag behavior.
 
-### Avalonia 12.1.4 source comparison
+### Historical Avalonia 12.1.4 source comparison
 
-Pinned dependency: `Avalonia` 12.1.4 in `src/SvcSystems.Avalonia.DynamicTableView/SvcSystems.Avalonia.DynamicTableView.csproj`. The following links are version-tagged upstream implementation, not a guarantee of behavior in later releases:
+At the time of this historical comparison, the pinned dependency was `Avalonia` 12.1.4 in `src/SvcSystems.Avalonia.DynamicTableView/SvcSystems.Avalonia.DynamicTableView.csproj`. The following links are version-tagged upstream implementation, not a guarantee of behavior in later releases:
 
 - [TableView](https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/src/Avalonia.Controls/TableView.cs): exposes `Columns` and `CanUserResizeColumns`; its column-change and layout invalidation methods are internal. It creates TableViewRow containers and rebuilds realized rows when columns change.
 - [TableViewColumn](https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/src/Avalonia.Controls/TableViewColumn.cs): exposes `HeaderTemplate`, `HeaderTheme`, `CellTemplate`, `CellTheme`, `Width`, `IsVisible`, `CanUserResize`, and read-only `ActualWidth`. A width change resets actual widths via the table. There is no column `MinWidth` property in this implementation.
@@ -36,7 +35,22 @@ This verifies an observable notification for synchronization, not a complete int
 
 A guarded observer prototype clamps native Width to 100 and copies it to column metadata. The headless test moves the pointer 350 pixels left, then 30 pixels right: the pointer is still left of the clamped divider and the width remains 100. A further move past the divider increases the width. All three drag events arrive, and pointer capture stays on the same grip descendant; capture loss is not the cause. The reverse event still reports a negative native drag delta. A comparison without the minimum clamp shows a positive reverse delta and width recovery when layout can follow the pointer.
 
-In Avalonia 12.1.4, [Thumb](https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/src/Avalonia.Controls/Primitives/Thumb.cs) computes each delta from the pointer position relative to the grip and its press position; [TableViewColumnHeader](https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/src/Avalonia.Controls/TableViewColumnHeader.cs) applies that delta to ActualWidth. After the observer clamps Width and layout places the grip at the minimum, the pointer remains beyond that grip, so reversing within the overshoot still yields a negative delta. The existing custom handler instead uses successive pointer positions, allowing an immediate reverse at the minimum. The observer approach therefore cannot preserve that behavior using native width notifications alone. Retain the production custom resize path; do not proceed with the real-control native integration on this basis. This is a limitation of the tested API approach, not evidence that all possible native extensions are impossible. The headless result does not establish behavior on every platform. CaptureState/RestoreState, scrolling, sorting and reordering under a native integration remain untested.
+In Avalonia 12.1.4, [Thumb](https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/src/Avalonia.Controls/Primitives/Thumb.cs) computes each delta from the pointer position relative to the grip and its press position; [TableViewColumnHeader](https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/src/Avalonia.Controls/TableViewColumnHeader.cs) applies that delta to ActualWidth. After the observer clamps Width and layout places the grip at the minimum, the pointer remains beyond that grip, so reversing within the overshoot still yields a negative delta. The existing custom handler instead uses successive pointer positions, allowing an immediate reverse at the minimum. The observer approach therefore could not preserve that behavior using native width notifications alone on 12.1.4. Avalonia 12.1.6 adds native min/max clamping, but that does not by itself establish that the Thumb delta behavior changed; re-run the reverse-drag test on 12.1.6 before reconsidering the custom path. This is a limitation of the tested API approach, not evidence that all possible native extensions are impossible. The headless result does not establish behavior on every platform. CaptureState/RestoreState, scrolling, sorting and reordering under a native integration remain untested.
+
+### Avalonia 12.1.6 column-limit audit and implementation
+
+The 12.1.6 release notes add `TableViewColumn` minimum and maximum width limits in [PR #22707](https://github.com/AvaloniaUI/Avalonia/pull/22707). The tagged [column source](https://github.com/AvaloniaUI/Avalonia/blob/12.1.6/src/Avalonia.Controls/TableViewColumn.cs) exposes styled `MinWidth` and `MaxWidth` properties. The limits apply to pixel, star, auto, and interactive resizing; `MinWidth` defaults to 0, `MaxWidth` to positive infinity, and the minimum takes precedence if the limits conflict. The [12.1.6 layout helper](https://github.com/AvaloniaUI/Avalonia/blob/12.1.6/src/Avalonia.Controls/Presenters/TableViewLayoutHelper.cs) clamps fixed widths and redistributes Star space when limits are reached. If all Star maxima are reached, unused space may remain; if minima exceed the available width, columns may overflow.
+
+The sizing migration is complete with these decisions:
+
+- `DynamicTableViewColumn` now exposes `MaxWidth` (default positive infinity) alongside its existing `MinWidth`. Both limits notify attached tables; invalid maximum values are rejected, positive infinity is allowed, and the minimum wins if the limits conflict. Pixel metadata, custom Auto/Cells/Header measurements, resize deltas, and restored pixel widths honor both effective limits. State format is unchanged.
+- `DynamicTableView` forwards metadata at `BindingPriority.Template`, allowing native `TableViewColumn.MinWidth` and `MaxWidth` styles to override it. The custom attached minimum property has been removed.
+- DynamicTableView Star columns remain native Star `GridLength`s. Avalonia 12.1.6 handles their minimum/maximum constraints and redistribution, so `StarColumnWidths` and the custom per-layout Star pass were removed. Tests cover weighted Star sizing, viewport shrink/overflow, hidden columns, max redistribution, and unused space when all maxima are reached.
+- DynamicTableView Auto/Cells/Header sizing remains custom pixel measurement, so it explicitly clamps measured widths. The custom pointer resize also remains: native column limits now clamp its result, but the native grip still fails the immediate reverse-drag contract.
+
+Verification:
+
+`Native_style_can_set_column_minimum_and_maximum_widths` and `Metadata_minimum_still_applies_when_no_style_sets_one` cover native style precedence and metadata fallback. Focused coverage also includes live max changes, Auto max clamping, native Star redistribution and saturation, restored width clamping, and min/max resize behavior. `Native_resize_remains_at_minimum_while_pointer_is_inside_the_overshoot` is the retained evidence for keeping the custom gesture. Verification on the final state: build succeeded with 0 errors (278 warnings); focused sizing suite passed 51 tests; full suite passed 267 tests.
 
 ## 2. Column configuration and lifecycle
 
@@ -46,15 +60,15 @@ Capability-driven query removal is scoped to the disabled column: `ColumnOnSortC
 
 Header subscriptions follow the attached lifetime. `DynamicTableViewHeader` subscribes to `HeaderChanged`, `SortCapabilityChanged`, `FilterCapabilityChanged`, and `FilterConfigurationChanged` in `OnAttachedToVisualTree` and unsubscribes on detach; `UpdateCapabilities` also detaches the click handler, hides an open flyout, and clears or rebuilds the attached flyout. `DynamicTableViewSource.SynchronizeColumnSubscriptions` compares observed columns against `Columns` on every collection change and unsubscribes in `Dispose`, so a definition shared by two sources only keeps the subscription of the source that still contains it. Verification: `Column_query_notifications_follow_source_membership_and_disposal`, `Disabling_filter_capability_hides_an_open_flyout_and_its_filter`, and `Column_capabilities_changed_while_detached_apply_after_reattachment`.
 
-Full suite: 250 tests passed. Sizing metadata and filter configuration now notify as well.
+Full suite at the final verification point: 267 tests passed. Sizing metadata and filter configuration now notify as well.
 
-Width and minimum widths notify through `DynamicTableViewColumn.WidthOptionsChanged`. `WidthMode`, `Width`, and `MinWidth` now validate (finite, non-negative) and raise the event; an attached `DynamicTableView` observes the definitions of its current source only while attached and re-applies the initial width, drops any manual-size key, and re-queues Star sizing and auto-width measurement. Metadata changed while detached is applied in `OnAttachedToVisualTree` via `ApplyWidthMetadataToNativeColumns`, so a pending change is not lost. `RestoreState` and `ResizeColumnAtDivider` write through `SetColumnWidthMetadata`, which suppresses re-entrancy so an internal write does not look like a caller edit. Verification: `Changing_width_metadata_updates_the_attached_column_while_visible`, `Pending_width_metadata_change_is_used_when_the_table_attaches`, and `Changing_width_metadata_overrides_a_restored_manual_width`.
+Width metadata and limits notify through `DynamicTableViewColumn.WidthOptionsChanged`. `WidthMode`, `Width`, and `MinWidth` validate finite, non-negative values; `MaxWidth` rejects negative and NaN values while allowing positive infinity. Attached tables apply metadata limits below native styles and reapply initial sizing when metadata changes. Metadata changed while detached is applied on reattachment. `RestoreState` and `ResizeColumnAtDivider` write through `SetColumnWidthMetadata`, which suppresses re-entrancy. Native Star layout no longer needs a separate invalidation pass. Verification includes `Changing_width_metadata_updates_the_attached_column_while_visible`, `Pending_width_metadata_change_is_used_when_the_table_attaches`, `Changing_width_metadata_overrides_a_restored_manual_width`, and the new max-width tests.
 
 Filter configuration notifies through `DynamicTableViewColumn.FilterConfigurationChanged`; `FilterChoices` and `FilterFlyoutFactory` raise it, attached headers rebuild the attached flyout and close an open one, and the active filter descriptor is intentionally preserved. Verification: `Changing_filter_choices_rebuilds_the_next_flyout_and_keeps_active_filter` and `Changing_filter_factory_rebuilds_the_next_custom_flyout`.
 
 Audit: text wrapping, trimming, maximum lines, header text, cell template, searchability, sort/filter capabilities, sizing metadata, and filter configuration all notify now. Sizing changes are applied by an attached table rather than the definition itself, so a definition with no attached table simply keeps its metadata. Definitions can also be shared by sources, so subscriptions and cleanup account for more than one owner. The user selected immediate removal of the corresponding active descriptor when a sort or filter affordance is disabled.
 
-Superseded: the original audit recorded `MinWidth` as plain metadata with no style path. The user rejected that, because a theme cannot own a per-column minimum when every definition must repeat it. `MinWidth` is now also settable from a style through the attached `DynamicTableViewColumnProperties.MinWidthProperty` on the native `TableViewColumn`, targeted by a class copied from `DynamicTableViewColumn.Classes`. A styled value takes precedence over the metadata value, and a change to it re-applies sizing on an attached table. Verification: `Style_can_set_a_column_minimum_width` and `Metadata_minimum_still_applies_when_no_style_sets_one`. Full suite: 250 tests passed.
+The attached-property workaround has been removed. Native `TableViewColumn.MinWidth`/`MaxWidth` styles are the documented path; metadata defaults are installed at Template priority so direct styles win. Verification: `Native_style_can_set_column_minimum_and_maximum_widths` and `Metadata_minimum_still_applies_when_no_style_sets_one`.
 
 ### Manual sizing state: ownership decision
 
@@ -94,7 +108,7 @@ The filter button already had an accessible name. Sort state did not: it was con
 - Cover single and hidden columns, horizontal scrolling, reorder, minimum constraints, repeated and reverse drags, pointer capture loss, restore, and detach/reattach. Done.
 - Cover keyboard and automation behavior, filter/sort interactions, and alternative themes/templates; distinguish supported customization from private template assumptions. Done for the interactions above plus sort-state automation text. Customization relies on the public control-theme and template-binding surface, not private template internals.
 - Verify accessibility semantics and focus behavior with appropriate automation and manual platform checks. Automation coverage is in place for the filter button name and sort state; screen-reader narration and platform-specific focus order still need a manual pass on each shipping platform.
-- Run the required solution build before tests, then focused and full suites; document platform gaps. Done: `dotnet build --tl:off -clp:ErrorsOnly` precedes every test run, and 250 tests pass. All UI results are headless; no physical-platform verification has been recorded.
+- Run the required solution build before tests, then focused and full suites; document platform gaps. Done: `dotnet build --tl:off -clp:ErrorsOnly` succeeded with 0 errors (278 warnings), the focused sizing suite passed 51 tests, and the full suite passed 267 tests. All UI results are headless; no physical-platform verification has been recorded.
 
 ## 4. Performance measurement
 
@@ -137,11 +151,11 @@ Re-measured after the composition extraction moved this path into `ColumnWidthCa
 
 Allocation is unchanged, which is the claim the extraction had to preserve: the star loop still runs without scratch storage and the sizing types add none. The mean moved by 1.4 ms at 100 rows and 1.5 ms at 1,000, both inside the recorded error bars (23.284 ms and 71.763 ms respectively), so the difference is not resolvable with this job. The conclusion supported here is narrow and sufficient: the extraction introduced no measurable regression on the measured path. It does not show an improvement, and it is not evidence about paths without a baseline.
 
-### Star layout: removing the per-frame recompute
+### Historical Star layout: custom per-frame recompute (removed)
 
-`OnLayoutUpdated` ran the star redistribution on every layout pass, which includes every scroll frame. The pass wrote `native.Width`, so it also invalidated layout and could feed another pass. Scrolling cannot change a star width, so the work was wasted; the user-visible symptom was star columns settling after a scroll.
+Before the 12.1.6 migration, `OnLayoutUpdated` ran the custom star redistribution on every layout pass, including scroll frames. The pass wrote `native.Width`, which invalidated layout and could feed another pass. Scrolling cannot change a star width, so this work was unnecessary; the user-visible symptom was star columns settling after a scroll.
 
-The pass now compares a key of its three real inputs — the width budget left after fixed columns take their realized width, the column count, and a revision bumped by width-metadata and collection changes — and skips the redistribution and writes when the key is unchanged. Measured on the shrinking-viewport test: 18 layout passes produced 8 recomputes, one per actual viewport change.
+The old pass compared its three inputs — the width budget, column count, and width-metadata revision — and skipped redistribution when unchanged. The historical shrinking-viewport test measured 18 layout passes and 8 recomputes. That custom pass has since been removed; Avalonia 12.1.6 owns Star distribution and column-limit enforcement.
 
 ### Auto-width: skipping measurement for cells that already fit
 
@@ -157,11 +171,11 @@ Measured with `AutoWidthAfterSourceUpdate`, ShortRun, same machine and runtime a
 
 A cached cell-sample table was implemented first and **measured worse** (22.79 ms at 10,000 rows). Retaining a maximum across passes means a stale, too-large sample makes the fit test fail for every cell, so all of them are measured anyway, and the cache adds its own lookups. It was removed. The lesson recorded here is that the per-pass maximum is the only state this pass needs.
 
-Avalonia cannot enforce this itself. `TableViewLayoutHelper.UpdateActualWidths` distributes the star budget purely proportionally with no minimum awareness, so two star columns with a minimum above their share both render below it. The redistribution is therefore required, and the minimum cannot be delegated to the platform.
+On Avalonia 12.1.4, `TableViewLayoutHelper.UpdateActualWidths` distributed the Star budget proportionally without minimum awareness, which required the library's custom redistribution. Avalonia 12.1.6 adds native min/max-aware Star redistribution; DynamicTableView now retains native Star widths and delegates this behavior to Avalonia.
 
-### Star layout: removing the below-minimum flash
+### Historical Star layout: removing the below-minimum flash (custom pass removed)
 
-The previous loop wrote `native.Width` as each column was resolved, so a constrained column could be arranged below its minimum for one frame and then snap to it. `StarColumnWidths.ComputeWidths` now resolves every width into a buffer and the caller applies them in one pass, so no width below the minimum is ever written. Verification: `Star_columns_never_apply_a_width_below_their_minimum_while_the_viewport_shrinks` asserts that every pixel width applied while shrinking from 900 to 200 is at or above the minimum, in addition to the existing `ActualWidth >= MinWidth` assertions.
+The old custom loop could write intermediate pixel widths below the minimum. It resolved a buffer before applying widths to avoid that flash. `StarColumnWidths` is now removed; `Star_columns_never_apply_a_width_below_their_minimum_while_the_viewport_shrinks` observes native `ActualWidth` changes and verifies native Star values stay at or above their minimum while shrinking from 900 to 200.
 
 - Establish representative row and column counts, update rates, viewport sizes, themes, and interaction workloads. Row counts and a 20-column case are covered; update rates, viewport sizes, and themes are not yet varied.
 - Use existing benchmarks and profiling to measure auto-width passes, realized-cell traversal, layout invalidation, resize/reorder input, allocations, and UI responsiveness. Include many-column scenarios because native cells are not column-virtualized. Auto width is measured; scrolling, column moves, state restore, and star layout have benchmarks but no recorded baseline.
@@ -176,7 +190,7 @@ Status: Decided. The record below keeps the single subclass, defers both the nat
 | Option | Correctness | Maintenance | Performance | Accessibility | Platform risk |
 |--------|-------------|-------------|-------------|---------------|---------------|
 | **Keep the subclass** (chosen) | Only option proven against the full retained-feature test suite | One 1066-line control with six clustered responsibilities | Bounded by realized cells; virtualization confirmed on the auto-width path | Automation names for filter and sort state now exist; rest unverified | Relies on public Avalonia surface plus two upstream template part names |
-| **Native extension points** | Cannot meet the reverse-drag contract (section 1) | Lowest churn when upstream adds APIs | Native layout, but no DynamicTableView minimum widths | Inherits Avalonia's own semantics | Best long-term, blocked today |
+| **Native extension points** | Native min/max sizing is now covered; native grip still fails the reverse-drag contract (section 1) | Lowest churn for layout and sizing | Native layout and limit-aware Star redistribution | Inherits Avalonia's own semantics | Preferred for sizing; custom pointer interaction remains |
 | **Add a second `TableView`-derived control** | Preserves behavior only if the interaction seam is factored out first; no behavior gain by itself | Does not shrink the class — converts private fields into a `protected` contract; adds a second public type to document and test | Neutral | Neutral | Splits exposure: display type avoids pointer/template coupling, interaction type keeps it |
 | **Extract adapters/composition** | Preserves behavior if done incrementally under the existing tests | Splits responsibilities; adds indirection | Neutral if hot paths stay allocation-free | Neutral | Reduces exposure to template internals over time |
 | **Vendor/fork Avalonia controls** | Full control over header input and layout | Tracks upstream fixes, license, upgrades, and per-platform testing by hand | Could optimize column layout | Would own all accessibility work | Worst: every Avalonia release becomes a merge |
@@ -206,7 +220,7 @@ So a split must first introduce a base contract (interface or abstract base) cov
 
 ### Decision
 
-**Keep the single subclass.** Every retained behavior — custom resize with immediate reverse at the minimum, header reorder, selection drag, keyed state capture/restore, capability-driven query cleanup, and the live-update notification contract — is implemented and regression-tested against `TableView`. The native-resize option is disproven for the reverse-drag contract, not merely unexplored, so replacing the custom interaction now would regress tested behavior. A fork is unjustified: no blocker has been found that the public surface cannot express. A second `TableView`-derived control is deferred rather than adopted: it reduces consumer surface area but requires unsealing the class, freezing private state as `protected` API, and retyping the header and cell against a new base contract, all inside the cluster that is still the source of defects.
+**Keep the single subclass.** Every retained behavior — custom resize with immediate reverse at the minimum, header reorder, selection drag, keyed state capture/restore, capability-driven query cleanup, and the live-update notification contract — is implemented and regression-tested against `TableView`. Native min/max sizing and Star redistribution are now used, but the native pointer grip remains unsuitable because it cannot reverse within the minimum-width overshoot. A fork is unjustified: no blocker has been found that the public surface cannot express. A second `TableView`-derived control is deferred rather than adopted: it reduces consumer surface area but requires unsealing the class, freezing private state as `protected` API, and retyping the header and cell against a new base contract, all inside the interaction cluster that is still the source of defects.
 
 The evidence that the subclass is the right shape, rather than merely the incumbent: 250 tests cover the retained surface, all UI results are headless, and the one measured performance path shows the design goal holds (auto-width stays flat from 100 to 10,000 rows because only realized cells are measured).
 
@@ -218,16 +232,15 @@ The class was instead reduced by extracting cohesive units, with no public surfa
 
 | Extracted | Kind | Owns |
 |---|---|---|
-| `ColumnWidthCalculator` | static, pure | Initial width, effective minimum (styled over metadata), star weight and star width |
-| `StarColumnWidths` | static, pure | The constrained-minimum redistribution loop over available width |
+| `ColumnWidthCalculator` | static, pure | Initial pixel width, effective limits, and pixel-width clamping |
 | `DynamicTableViewStateSerializer` | static, pure | State capture, restore ordering, and restored-width clamping |
 | `TextMeasurer` | instance | The off-tree `TextBlock` used for auto-width measurement |
 | `ResizeHeaderCache` | instance | Realized headers and grips, staleness detection, divider hit testing |
 | `ColumnResizeController` | instance | The resize gesture: begin/move/end, pointer ownership, hover feedback |
 
-Allocation behavior is unchanged: the star loop still runs without scratch storage, and the two static sizing types add no allocation to the layout path. `DynamicTableView` keeps the side effects (moving columns, writing width metadata, capturing the pointer) so the extracted types stay testable without a visual tree.
+The former library-owned Star redistribution loop and its per-layout invalidation/cache state are gone; native Star columns now retain their weights and let Avalonia calculate actual widths. `ColumnWidthCalculator` remains allocation-free on the sizing path. DynamicTableView keeps side effects (moving columns, writing width metadata, capturing the pointer) in the control.
 
-`ResizeColumnAtDivider` stays `internal`. It is the operation the drag performs, so the resize contract is tested directly rather than only through a simulated pointer gesture, and the test project reaches it through an `InternalsVisibleTo` entry in the library `.csproj`. That keeps the member out of the shipped public surface — a host driving resize from a keyboard shortcut would need a new public member and its own API decision, which is not made here. Verification: `Resize_column_at_divider_grows_and_shrinks_the_column` and `Resize_column_at_divider_ignores_unknown_key_and_disabled_resizing`. Full suite: 250 tests passed; both `net10.0` and `net11.0` build with no warnings.
+`ResizeColumnAtDivider` stays `internal`. It is the operation the drag performs, so the resize contract is tested directly rather than only through a simulated pointer gesture, and the test project reaches it through an `InternalsVisibleTo` entry in the library `.csproj`. That keeps the member out of the shipped public surface — a host driving resize from a keyboard shortcut would need a new public member and its own API decision, which is not made here. Verification: `Resize_column_at_divider_grows_and_shrinks_the_column` and `Resize_column_at_divider_ignores_unknown_key_and_disabled_resizing`. Final full suite: 267 tests passed; the required build succeeded with 0 errors (278 warnings).
 
 ### Deferred risks
 
@@ -241,7 +254,7 @@ These are accepted, not resolved. Each has a stated trigger for revisiting.
 
 ### Conditions for revisiting this decision
 
-- Avalonia publishes supported column-resize minimums, header drag-reorder, or a per-column `MinWidth`; then re-run the section 1 comparison rather than assuming the old result holds.
+- Avalonia 12.1.6 per-column limits and native Star redistribution are adopted. Re-run the section 1 resize comparison if the native header/Thumb implementation changes.
 - The interaction cluster changes again for a third time, which would make extraction — or a second derived control — cheaper than continued patching.
 - A consumer asks for a read-only table that omits resize, reorder, and selection drag; then evaluate the derived split against the already-shrunk class.
 - A platform-specific defect appears that the subclass cannot fix through public API.

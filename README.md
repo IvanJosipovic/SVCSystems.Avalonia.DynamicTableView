@@ -68,6 +68,7 @@ using Avalonia.Media;
 
 columns[0].WidthMode = DynamicTableViewWidthMode.Star;
 columns[0].MinWidth = 120;
+columns[0].MaxWidth = 360;
 columns[0].CellTextWrapping = TextWrapping.Wrap;
 
 table.GridLinesVisibility = DynamicTableViewGridLinesVisibility.All;
@@ -76,7 +77,7 @@ table.CellMaxLines = 3;
 
 Column text options override table defaults for cells without a custom `CellTemplate`. Use `CellMaxLines = 0` for unlimited lines.
 
-To set a minimum width from a style, assign a class before the column is added to the table:
+To override a column's minimum or maximum width from a style, assign a class before the column is added to the table:
 
 ```csharp
 columns[0].Classes.Add("wide-column");
@@ -88,13 +89,13 @@ var table = new DynamicTableView { Source = source };
 Apply the class before assigning `Source`; the table copies column classes when it creates its native columns.
 
 ```xml
-<Style xmlns:dyn="using:SvcSystems.Avalonia.DynamicTableView"
-       Selector="TableViewColumn.wide-column">
-  <Setter Property="dyn:DynamicTableViewColumnProperties.MinWidth" Value="120" />
+<Style Selector="TableViewColumn.wide-column">
+  <Setter Property="MinWidth" Value="120" />
+  <Setter Property="MaxWidth" Value="360" />
 </Style>
 ```
 
-The styled minimum takes precedence over the column's `MinWidth`; without one, the column value is used.
+Native `TableViewColumn` style values take precedence over `DynamicTableViewColumn.MinWidth` and `MaxWidth` metadata.
 
 ## Save And Restore
 

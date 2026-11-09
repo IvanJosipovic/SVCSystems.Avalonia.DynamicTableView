@@ -90,8 +90,8 @@ internal static class DynamicTableViewStateSerializer
     }
 
     /// <summary>
-    /// Resolves the width to restore for one column. A pixel width is clamped to the effective minimum,
-    /// which may come from a style rather than the column metadata.
+    /// Resolves the width to restore for one column. A pixel width is clamped to the effective limits,
+    /// which may come from styles rather than the column metadata.
     /// </summary>
     public static double ResolveRestoredWidth(
         DynamicTableViewColumnState saved,
@@ -102,7 +102,10 @@ internal static class DynamicTableViewStateSerializer
         ArgumentNullException.ThrowIfNull(definition);
 
         return saved.WidthMode == DynamicTableViewWidthMode.Pixel
-            ? Math.Max(ColumnWidthCalculator.GetEffectiveMinWidth(definition, native), saved.Width)
+            ? ColumnWidthCalculator.ClampWidth(
+                saved.Width,
+                ColumnWidthCalculator.GetEffectiveMinWidth(definition, native),
+                ColumnWidthCalculator.GetEffectiveMaxWidth(definition, native))
             : saved.Width;
     }
 }
