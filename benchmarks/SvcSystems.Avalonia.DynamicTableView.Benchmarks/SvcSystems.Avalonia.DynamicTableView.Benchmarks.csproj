@@ -8,8 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
-    <PackageReference Include="Avalonia.Headless" Version="12.1.4" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Headless" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
   </ItemGroup>
 
   <ItemGroup>
