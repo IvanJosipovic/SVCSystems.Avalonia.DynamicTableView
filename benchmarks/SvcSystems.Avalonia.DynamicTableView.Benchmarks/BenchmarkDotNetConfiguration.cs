@@ -9,11 +9,10 @@ namespace SvcSystems.Avalonia.DynamicTableView.Benchmarks;
 /// Configures the runtime benchmark jobs.
 /// </summary>
 /// <remarks>
-/// The repository pins .NET 11 RC builds. BenchmarkDotNet 0.15.8 does not recognize them: it
-/// resolves the runtime to <c>RuntimeMoniker.NotRecognized</c> and throws from
-/// <c>RuntimeMonikerExtensions.GetRuntimeVersion</c> during job validation, so no benchmark
-/// could run. 0.16.0-preview.2 recognizes <c>CoreRuntime.Core11_0</c>, so the benchmarks name
-/// that runtime explicitly instead of relying on detection of the pinned RC build.
+/// The repository targets .NET 11. The latest stable BenchmarkDotNet release (0.15.8) does not
+/// recognize .NET 11; support first appears in 0.16.0-preview.1. The project therefore uses
+/// 0.16.0-preview.2 and names <c>CoreRuntime.Core11_0</c> explicitly instead of relying on
+/// detection of the pinned RC runtime.
 /// </remarks>
 public static class BenchmarkDotNetConfiguration
 {

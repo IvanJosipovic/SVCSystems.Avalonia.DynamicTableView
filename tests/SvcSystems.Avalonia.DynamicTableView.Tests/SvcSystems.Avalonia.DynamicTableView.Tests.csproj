@@ -20,7 +20,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\samples\SvcSystems.Avalonia.DynamicTableView.Sample\SvcSystems.Avalonia.DynamicTableView.Sample.csproj" />
     <ProjectReference Include="..\..\src\SvcSystems.Avalonia.DynamicTableView\SvcSystems.Avalonia.DynamicTableView.csproj" />
   </ItemGroup>
 

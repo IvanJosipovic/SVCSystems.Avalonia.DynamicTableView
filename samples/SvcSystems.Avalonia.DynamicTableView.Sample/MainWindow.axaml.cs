@@ -40,18 +40,14 @@ public sealed partial class MainWindow : Window, IDisposable
     private static DynamicTableViewColumn<SampleRow>[] CreateCodeColumns()
     {
         var name = DynamicTableViewColumn<SampleRow>.Create("name", "Name", static row => row.Name);
-        name.WidthMode = DynamicTableViewWidthMode.Star;
+        name.Width = new GridLength(1, GridUnitType.Star);
         var restarts = DynamicTableViewColumn<SampleRow>.Create("restarts", "Restarts", static row => row.Restarts);
-        restarts.WidthMode = DynamicTableViewWidthMode.Star;
+        restarts.Width = new GridLength(1, GridUnitType.Star);
         var ready = DynamicTableViewColumn<SampleRow>.Create("ready", "Ready", static row => row.Ready);
-        ready.WidthMode = DynamicTableViewWidthMode.Header;
         var cpuCores = DynamicTableViewColumn<SampleRow>.Create("cpuCores", "CPU cores", static row => row.CpuCores);
-        cpuCores.WidthMode = DynamicTableViewWidthMode.Cells;
         var memory = DynamicTableViewColumn<SampleRow>.Create("memory", "Memory", static row => row.Memory);
-        memory.WidthMode = DynamicTableViewWidthMode.Pixel;
-        memory.Width = 120;
+        memory.Width = new GridLength(120);
         var createdAt = DynamicTableViewColumn<SampleRow>.Create("createdAt", "Created", static row => row.CreatedAt);
-        createdAt.WidthMode = DynamicTableViewWidthMode.Cells;
         return
         [
             name,

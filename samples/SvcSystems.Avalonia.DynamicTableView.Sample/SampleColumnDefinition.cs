@@ -1,3 +1,5 @@
+using Avalonia.Controls;
+
 namespace SvcSystems.Avalonia.DynamicTableView.Sample;
 
 public sealed class SampleColumnDefinition
@@ -10,9 +12,7 @@ public sealed class SampleColumnDefinition
 
     public Func<SampleRow, object?>? ValueSelector { get; set; }
 
-    public DynamicTableViewWidthMode WidthMode { get; set; } = DynamicTableViewWidthMode.Auto;
-
-    public double Width { get; set; } = 1;
+    public GridLength Width { get; set; } = GridLength.Auto;
 
     public DynamicTableViewColumn<SampleRow> CreateColumn()
     {
@@ -20,7 +20,6 @@ public sealed class SampleColumnDefinition
             ?? throw new InvalidOperationException($"Column '{Key}' has no value selector.");
         return new DynamicTableViewColumn<SampleRow>(Key, Header, ValueType, valueSelector)
         {
-            WidthMode = WidthMode,
             Width = Width
         };
     }

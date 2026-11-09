@@ -61,7 +61,7 @@ public class DynamicTableViewUiBenchmarks : IDisposable
     {
         Setup();
         for (int index = 0; index < _source.Columns.Count; index++)
-            _source.Columns[index].WidthMode = DynamicTableViewWidthMode.Pixel;
+            _source.Columns[index].Width = new GridLength(80);
         _table.RestoreState(_table.CaptureState());
         Dispatcher.UIThread.RunJobs();
     }
@@ -73,18 +73,15 @@ public class DynamicTableViewUiBenchmarks : IDisposable
         for (int index = 2; index < _source.Columns.Count; index++)
         {
             _source.Columns[index].MinWidth = 20;
-            _source.Columns[index].WidthMode = DynamicTableViewWidthMode.Pixel;
-            _source.Columns[index].Width = 20;
+            _source.Columns[index].Width = new GridLength(20);
         }
-        _source.Columns[0].Width = 1;
-        _source.Columns[0].WidthMode = DynamicTableViewWidthMode.Star;
-        _source.Columns[1].WidthMode = DynamicTableViewWidthMode.Star;
-        _source.Columns[1].Width = 2;
+        _source.Columns[0].Width = new GridLength(1, GridUnitType.Star);
+        _source.Columns[1].Width = new GridLength(2, GridUnitType.Star);
         var columns = new DynamicTableViewColumnState[_source.Columns.Count];
         for (int index = 0; index < columns.Length; index++)
         {
             DynamicTableViewColumn column = _source.Columns[index];
-            columns[index] = new(column.Key, index, column.Width, column.WidthMode);
+            columns[index] = new(column.Key, index, column.Width);
         }
         _table.RestoreState(new DynamicTableViewState(columns, [], []));
         Dispatcher.UIThread.RunJobs();
@@ -116,7 +113,7 @@ public class DynamicTableViewUiBenchmarks : IDisposable
     }
 
     [Benchmark]
-    public double AutoWidthAfterSourceUpdate()
+    public double DefaultWidthAfterSourceUpdate()
     {
         _longName = !_longName;
         var visibleRow = _table.GetVisualDescendants().OfType<TableViewRow>().First();

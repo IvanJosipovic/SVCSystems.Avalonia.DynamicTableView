@@ -21,23 +21,22 @@ internal static class DynamicTableViewStateSerializer
         for (var index = 0; index < columns.Count; index++)
         {
             DynamicTableViewColumn definition = columns[index];
-            var widthMode = definition.WidthMode;
-            var width = definition.Width;
-            if (widthMode != DynamicTableViewWidthMode.Star && actualWidthResolver is not null)
+            GridLength width = definition.Width;
+            if (width.GridUnitType == GridUnitType.Pixel && actualWidthResolver is not null)
             {
                 var actualWidth = actualWidthResolver(definition.Key);
                 if (double.IsFinite(actualWidth) && actualWidth > 0)
-                    width = actualWidth;
+                    width = new GridLength(actualWidth);
             }
 
-            captured.Add(new(definition.Key, index, width, widthMode));
+            captured.Add(new(definition.Key, index, width));
         }
 
         return captured;
     }
 
     /// <summary>
-    /// Validates every saved width and Star weight before a restore mutates anything.
+    /// Validates every saved native width before a restore mutates anything.
     /// </summary>
     /// <remarks>
     /// Restoring moves columns before it writes widths, so a width rejected part-way through the
@@ -52,12 +51,13 @@ internal static class DynamicTableViewStateSerializer
         for (var index = 0; index < state.Columns.Count; index++)
         {
             DynamicTableViewColumnState saved = state.Columns[index];
-            if (!double.IsFinite(saved.Width) || saved.Width < 0)
+            if (saved.Width.GridUnitType != GridUnitType.Auto &&
+                (!double.IsFinite(saved.Width.Value) || saved.Width.Value < 0))
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(state),
-                    saved.Width,
-                    $"Column '{saved.Key}' has an invalid width. The width must be a finite, non-negative number.");
+                    saved.Width.Value,
+                    $"Column '{saved.Key}' has an invalid width. Pixel and Star widths must be finite and non-negative.");
             }
         }
     }
@@ -89,23 +89,4 @@ internal static class DynamicTableViewStateSerializer
         return ordered;
     }
 
-    /// <summary>
-    /// Resolves the width to restore for one column. A pixel width is clamped to the effective limits,
-    /// which may come from styles rather than the column metadata.
-    /// </summary>
-    public static double ResolveRestoredWidth(
-        DynamicTableViewColumnState saved,
-        DynamicTableViewColumn definition,
-        TableViewColumn? native)
-    {
-        ArgumentNullException.ThrowIfNull(saved);
-        ArgumentNullException.ThrowIfNull(definition);
-
-        return saved.WidthMode == DynamicTableViewWidthMode.Pixel
-            ? ColumnWidthCalculator.ClampWidth(
-                saved.Width,
-                ColumnWidthCalculator.GetEffectiveMinWidth(definition, native),
-                ColumnWidthCalculator.GetEffectiveMaxWidth(definition, native))
-            : saved.Width;
-    }
 }

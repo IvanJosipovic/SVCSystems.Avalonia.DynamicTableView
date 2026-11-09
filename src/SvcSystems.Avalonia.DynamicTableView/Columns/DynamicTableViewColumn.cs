@@ -16,8 +16,7 @@ public abstract class DynamicTableViewColumn
     private TextWrapping? _cellTextWrapping;
     private TextTrimming? _cellTextTrimming;
     private int? _cellMaxLines;
-    private DynamicTableViewWidthMode _widthMode = DynamicTableViewWidthMode.Auto;
-    private double _width = 1;
+    private GridLength _width = GridLength.Auto;
     private double _minWidth = 40;
     private double _maxWidth = double.PositiveInfinity;
 
@@ -40,8 +39,9 @@ public abstract class DynamicTableViewColumn
     /// Gets the style classes applied to the native <see cref="TableViewColumn"/>.
     /// </summary>
     /// <remarks>
-    /// Classes are copied to the native column before it attaches to the table, so styles that
-    /// target them take effect. Use them to style individual columns, including the native
+    /// Classes are copied to the native column before it attaches so styles take effect, and
+    /// changes are synchronized while the table is attached. Use them to style individual columns,
+    /// including the native
     /// <see cref="TableViewColumn.MinWidth"/> and <see cref="TableViewColumn.MaxWidth"/> properties.
     /// </remarks>
     public Classes Classes { get; } = [];
@@ -123,27 +123,17 @@ public abstract class DynamicTableViewColumn
 
     internal event EventHandler? CellTextOptionsChanged;
 
-    /// <summary>Gets or sets width behavior. Changing it re-applies this column's width in attached tables.</summary>
-    public DynamicTableViewWidthMode WidthMode
-    {
-        get => _widthMode;
-        set
-        {
-            if (_widthMode == value)
-                return;
-            _widthMode = value;
-            WidthOptionsChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    /// <summary>Gets or sets the fixed width or Star weight. Changing it re-applies this column's width in attached tables.</summary>
-    public double Width
+    /// <summary>Gets or sets the native Avalonia column width. The default is <see cref="GridUnitType.Auto"/>.</summary>
+    /// <remarks>
+    /// Pixel, Star, and Auto sizing follow <see cref="TableViewColumn.Width"/> semantics. In
+    /// Avalonia's TableView layout, Auto participates as a 1* share rather than measuring content.
+    /// Changing this value updates attached tables.
+    /// </remarks>
+    public GridLength Width
     {
         get => _width;
         set
         {
-            if (!double.IsFinite(value) || value < 0)
-                throw new ArgumentOutOfRangeException(nameof(value), "The width must be a finite, non-negative number.");
             if (_width.Equals(value))
                 return;
             _width = value;
