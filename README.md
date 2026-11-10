@@ -20,13 +20,19 @@ A read-only Avalonia table backed by DynamicData, with typed column selectors an
 dotnet add package SvcSystems.Avalonia.DynamicTableView
 ```
 
-Add the theme after `FluentTheme` in `App.axaml`:
+Add the compiled theme after `FluentTheme` in `App.axaml`. Because the theme is compiled into the `DynamicTableViewTheme` class, include it as an element rather than loading the `.axaml` file with `StyleInclude`:
 
 ```xml
-<Application.Styles>
-  <FluentTheme />
-  <StyleInclude Source="avares://SvcSystems.Avalonia.DynamicTableView/Themes/DynamicTableViewTheme.axaml" />
-</Application.Styles>
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fluent="using:Avalonia.Themes.Fluent"
+             xmlns:table="using:SvcSystems.Avalonia.DynamicTableView"
+             x:Class="MyApp.App">
+  <Application.Styles>
+    <fluent:FluentTheme />
+    <table:DynamicTableViewTheme />
+  </Application.Styles>
+</Application>
 ```
 
 ## Quick Start
