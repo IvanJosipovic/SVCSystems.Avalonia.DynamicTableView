@@ -2965,6 +2965,50 @@ public sealed class DynamicTableViewUiTests
         }
     }
 
+    [AvaloniaFact]
+    public void Right_clicking_column_header_opens_ordered_visibility_menu()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        using var source = DynamicTableViewTestData.CreateSource(cache);
+        DynamicTableView table = new() { Source = source };
+        Window window = new() { Width = 520, Height = 260, Content = table };
+
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            source.Columns.Move(0, 2);
+            Dispatcher.UIThread.RunJobs();
+
+            TableViewColumnHeader header = table.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                .First(item => item.Column?.Header is DynamicTableViewColumn);
+            Point position = header.TranslatePoint(new Point(header.Bounds.Width / 2, header.Bounds.Height / 2), window)
+                ?? throw new InvalidOperationException("Column header has no window position.");
+            window.MouseDown(position, MouseButton.Right);
+            window.MouseUp(position, MouseButton.Right);
+            Dispatcher.UIThread.RunJobs();
+
+            ContextMenu menu = Assert.IsType<ContextMenu>(header.ContextMenu);
+            Assert.True(menu.IsOpen);
+            MenuItem[] items = menu.Items.Cast<MenuItem>().ToArray();
+            Assert.Equal(source.Columns.Select(static column => column.Header.ToString()), items.Select(static item => item.Header));
+            Assert.All(items, static item => Assert.Equal(MenuItemToggleType.CheckBox, item.ToggleType));
+            Assert.All(items, static item => Assert.True(item.IsChecked));
+
+            TableViewColumn hiddenColumn = table.Columns[0];
+            items[0].IsChecked = false;
+            Assert.False(hiddenColumn.IsVisible);
+            Assert.False(items[0].IsChecked);
+
+            items[0].IsChecked = true;
+            Assert.True(hiddenColumn.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static void RightClickRow(Window window, DynamicTableView table, string id)
     {
         var row = table.GetVisualDescendants().OfType<TableViewRow>()

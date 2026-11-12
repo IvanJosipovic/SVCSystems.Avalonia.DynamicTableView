@@ -835,6 +835,16 @@ public sealed partial class DynamicTableView : TableView
 
     private void HandleRightClick(PointerPressedEventArgs e)
     {
+        TableViewColumnHeader? columnHeader = ControlTreeHelpers.FindVisualAncestor<TableViewColumnHeader>(e.Source);
+        if (columnHeader?.Column?.Header is DynamicTableViewColumn)
+        {
+            ContextMenu menu = CreateColumnVisibilityContextMenu(columnHeader);
+            columnHeader.ContextMenu = menu;
+            menu.Open(columnHeader);
+            e.Handled = true;
+            return;
+        }
+
         if (ControlTreeHelpers.FindVisualAncestor<TableViewRow>(e.Source) is not { DataContext: { } clicked } row)
             return;
         IReadOnlyList<object> targets;
@@ -847,6 +857,38 @@ public sealed partial class DynamicTableView : TableView
         ContextMenuRequested?.Invoke(this, new(clicked, targets));
         if (ContextMenu is ContextMenu contextMenu && ContextMenuItemsFactory is not null)
             contextMenu.ItemsSource = ContextMenuItemsFactory(targets);
+    }
+
+    internal ContextMenu CreateColumnVisibilityContextMenu(TableViewColumnHeader placementTarget)
+    {
+        ArgumentNullException.ThrowIfNull(placementTarget);
+        ContextMenu menu = new()
+        {
+            PlacementTarget = placementTarget
+        };
+
+        if (Source is null)
+            return menu;
+
+        foreach (DynamicTableViewColumn definition in Source.Columns)
+        {
+            if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
+                continue;
+
+            MenuItem item = new()
+            {
+                Header = definition.Header.ToString() ?? string.Empty,
+                ToggleType = MenuItemToggleType.CheckBox
+            };
+            item.Bind(MenuItem.IsCheckedProperty, new Binding(nameof(TableViewColumn.IsVisible))
+            {
+                Source = native,
+                Mode = BindingMode.TwoWay
+            });
+            menu.Items.Add(item);
+        }
+
+        return menu;
     }
 
     internal void SortColumn(string key)
