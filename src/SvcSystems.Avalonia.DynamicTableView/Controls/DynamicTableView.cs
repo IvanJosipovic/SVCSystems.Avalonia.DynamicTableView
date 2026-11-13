@@ -488,6 +488,21 @@ public sealed partial class DynamicTableView : TableView
         if (_applyingNativeColumnValues || sender is not TableViewColumn { Header: DynamicTableViewColumn definition } native)
             return;
 
+        if (e.Property == TableViewColumn.IsVisibleProperty && !native.IsVisible && !HasVisibleColumn())
+        {
+            // Keep the table usable when callers or the visibility context menu hide columns.
+            _applyingNativeColumnValues = true;
+            try
+            {
+                native.IsVisible = true;
+            }
+            finally
+            {
+                _applyingNativeColumnValues = false;
+            }
+            return;
+        }
+
         if (e.Property == TableViewColumn.MinWidthProperty ||
             e.Property == TableViewColumn.MaxWidthProperty)
         {
@@ -513,6 +528,17 @@ public sealed partial class DynamicTableView : TableView
                 _applyingNativeColumnValues = false;
             }
         }
+    }
+
+    private bool HasVisibleColumn()
+    {
+        foreach (TableViewColumn column in Columns)
+        {
+            if (column.IsVisible)
+                return true;
+        }
+
+        return false;
     }
 
     private void SynchronizeNativeColumnClasses(DynamicTableViewColumn definition)
