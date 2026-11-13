@@ -12,6 +12,40 @@ namespace SvcSystems.Avalonia.DynamicTableView.Tests.UI;
 public sealed class DynamicTableViewColumnLayoutTests
 {
     [AvaloniaFact]
+    public void Last_visible_column_cannot_be_hidden()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> column = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "name", "Name", static row => row.Name);
+        using var source = DynamicTableViewTestData.CreateSource(cache, [column]);
+        DynamicTableView table = new() { Source = source };
+
+        table.Columns[0].IsVisible = false;
+
+        Assert.True(table.Columns[0].IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Other_columns_can_be_hidden_while_one_column_remains_visible()
+    {
+        using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
+        cache.AddOrUpdate(DynamicTableViewTestData.CreateRows()[0]);
+        DynamicTableViewColumn<DynamicTableViewTestRow> first = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "first", "First", static row => row.Name);
+        DynamicTableViewColumn<DynamicTableViewTestRow> second = DynamicTableViewColumn<DynamicTableViewTestRow>.Create(
+            "second", "Second", static row => row.Name);
+        using var source = DynamicTableViewTestData.CreateSource(cache, [first, second]);
+        DynamicTableView table = new() { Source = source };
+
+        table.Columns[0].IsVisible = false;
+        table.Columns[1].IsVisible = false;
+
+        Assert.False(table.Columns[0].IsVisible);
+        Assert.True(table.Columns[1].IsVisible);
+    }
+
+    [AvaloniaFact]
     public void Native_style_can_set_column_minimum_and_maximum_widths()
     {
         using SourceCache<DynamicTableViewTestRow, string> cache = new(static row => row.Id);
