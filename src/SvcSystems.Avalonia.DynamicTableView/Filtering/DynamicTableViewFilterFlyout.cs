@@ -37,7 +37,7 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
             .Select(static filterOperator => new DynamicTableViewFilterChoice(
                 DynamicTableViewResources.GetFilterOperatorLabel(filterOperator), filterOperator))
             .ToArray();
-        SelectedOperatorChoice = OperatorChoices.FirstOrDefault();
+        SelectedOperatorChoice = OperatorChoices.Count > 0 ? OperatorChoices[0] : null;
         Classes.Add("dynamic-table-view-filter-flyout");
         RestoreFilterState();
         UpdateInputVisibility();
@@ -149,7 +149,7 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
         ClearValidationErrors();
         object? value = null;
         object? secondValue = null;
-        IReadOnlyList<object?>? values = null;
+        object?[]? values = null;
         if (filterOperator is DynamicTableViewFilterOperator.IsTrue or DynamicTableViewFilterOperator.IsFalse or DynamicTableViewFilterOperator.IsNull or DynamicTableViewFilterOperator.IsNotNull)
         {
             _source.SetFilter(new(_column.Key, filterOperator));
@@ -160,11 +160,11 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
         {
             if (filterOperator == DynamicTableViewFilterOperator.In)
             {
-                values = _multipleChoiceBox?.SelectedItems
+                values = _multipleChoiceBox?.SelectedItems?
                     .OfType<DynamicTableViewFilterChoice>()
                     .Select(static choice => choice.Value)
                     .ToArray() ?? [];
-                if (values.Count == 0)
+                if (values.Length == 0)
                 {
                     ReportValidationError(_multipleChoiceBox, DynamicTableViewResources.FilterValidationRequired);
                     return;
@@ -287,8 +287,9 @@ internal sealed partial class DynamicTableViewFilterFlyout : TemplatedControl
         foreach (var value in _selectedMultipleChoiceValues)
         {
             var choice = FilterChoices.FirstOrDefault(candidate => Equals(candidate.Value, value));
-            if (choice is not null && !_multipleChoiceBox.SelectedItems.Contains(choice))
-                _multipleChoiceBox.SelectedItems.Add(choice);
+            var selectedItems = _multipleChoiceBox.SelectedItems;
+            if (choice is not null && selectedItems is not null && !selectedItems.Contains(choice))
+                selectedItems.Add(choice);
         }
     }
 

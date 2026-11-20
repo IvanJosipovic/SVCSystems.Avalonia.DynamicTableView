@@ -74,5 +74,6 @@ public class DynamicTableViewInputBenchmarks : IDisposable
     {
         _source?.Dispose();
         _cache?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

@@ -101,6 +101,7 @@ public class DynamicTableViewUiBenchmarks : IDisposable
 
         _source?.Dispose();
         _cache?.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Benchmark]

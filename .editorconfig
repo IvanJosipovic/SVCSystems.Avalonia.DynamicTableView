@@ -1,0 +1,9 @@
+root = true
+
+# xUnit test names in this repository use underscores to read as sentences.
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+
+# DynamicTableViewColumn<T> intentionally exposes static typed factory methods.
+[src/**/DynamicTableViewColumnOfT.cs]
+dotnet_diagnostic.CA1000.severity = none

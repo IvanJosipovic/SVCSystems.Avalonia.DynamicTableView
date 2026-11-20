@@ -1990,7 +1990,7 @@ public sealed class DynamicTableViewUiTests
                 var item = Assert.IsType<DynamicTableViewTestRow>(row.DataContext);
                 Assert.Contains(row.GetVisualDescendants().OfType<TextBlock>(), textBlock => textBlock.Text == item.Name);
             });
-            Assert.Contains(visibleRows, row => ((DynamicTableViewTestRow)row.DataContext!).Id.CompareTo("row-0100") > 0);
+            Assert.Contains(visibleRows, row => string.Compare(((DynamicTableViewTestRow)row.DataContext!).Id, "row-0100", StringComparison.Ordinal) > 0);
         }
         finally
         {
@@ -3048,7 +3048,7 @@ public sealed class DynamicTableViewUiTests
             Assert.True(visibleLabels.Contains(header), $"Missing visible header '{header}'. Visible labels: {string.Join(",", visibleLabels)}. Headers: {string.Join("; ", headerDetails)}");
     }
 
-    private static Control GetHeaderControl(DynamicTableView table, int columnIndex)
+    private static TemplatedControl GetHeaderControl(DynamicTableView table, int columnIndex)
         => table.GetVisualDescendants().OfType<TableViewColumnHeader>()
             .Single(header => ReferenceEquals(header.Column, table.Columns[columnIndex]))
             .GetVisualDescendants().OfType<TemplatedControl>().First();

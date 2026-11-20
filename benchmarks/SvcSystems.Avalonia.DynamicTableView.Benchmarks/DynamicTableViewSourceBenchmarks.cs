@@ -38,6 +38,7 @@ public class DynamicTableViewSourceBenchmarks : IDisposable
     {
         _source?.Dispose();
         _cache?.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Benchmark]
@@ -89,7 +90,7 @@ public class DynamicTableViewSourceBenchmarks : IDisposable
     }
 
     [Benchmark]
-    public int CreateTwentyColumns()
+    public static int CreateTwentyColumns()
         => CreateColumns().Length;
 
     [Benchmark]

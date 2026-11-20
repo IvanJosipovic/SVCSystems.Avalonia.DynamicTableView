@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Reactive.Disposables;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
@@ -11,6 +12,7 @@ public sealed partial class DynamicTableView : TableView
     private const string ResizePointerOverClass = "dynamic-table-view-resize-pointerover";
     private const string ColumnResizingClass = "dynamic-table-view-column-resizing";
 
+    /// <summary>Gets or sets the source that supplies rows, columns, sorting, filtering, and selection.</summary>
     [GeneratedDirectProperty]
     public partial IDynamicTableViewSource? Source { get; set; }
 
@@ -57,6 +59,7 @@ public sealed partial class DynamicTableView : TableView
     private readonly ColumnResizeController _resize;
     private TableViewColumnHeader? _resizeHoverHeader;
     private TableViewColumnHeader? _filterButtonPointerHeader;
+    private CompositeDisposable? _columnVisibilityMenuSubscriptions;
 
     /// <summary>Creates an empty dynamic table.</summary>
     public DynamicTableView()
@@ -90,6 +93,7 @@ public sealed partial class DynamicTableView : TableView
     /// <summary>Raised when user right-clicks a realized row.</summary>
     public event EventHandler<DynamicTableViewContextMenuEventArgs>? ContextMenuRequested;
 
+    /// <inheritdoc />
     protected override Type StyleKeyOverride => typeof(TableView);
 
     /// <summary>Captures keyed column order and widths, source sorts and filters, and scroll offset.</summary>
@@ -168,6 +172,7 @@ public sealed partial class DynamicTableView : TableView
             QueueHeaderRefresh();
     }
 
+    /// <inheritdoc />
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -180,9 +185,12 @@ public sealed partial class DynamicTableView : TableView
         QueueScrollRestore();
     }
 
+    /// <inheritdoc />
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         LayoutUpdated -= OnLayoutUpdated;
+        _columnVisibilityMenuSubscriptions?.Dispose();
+        _columnVisibilityMenuSubscriptions = null;
         ClearColumnSubscriptions();
         _resizeHeaders.Invalidate();
         _resizeHeaders.Clear();
@@ -190,6 +198,7 @@ public sealed partial class DynamicTableView : TableView
         base.OnDetachedFromVisualTree(e);
     }
 
+    /// <inheritdoc />
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
         _scrollViewer = null;
@@ -212,7 +221,8 @@ public sealed partial class DynamicTableView : TableView
         if (source is null)
         {
             ItemsSource = null;
-            Selection = null;
+            // Avalonia annotates Selection as non-nullable but accepts null to detach it.
+            Selection = null!;
             Columns.Clear();
             foreach (TableViewColumn discarded in _nativeColumns.Values)
                 discarded.PropertyChanged -= NativeColumnOnPropertyChanged;
@@ -562,7 +572,7 @@ public sealed partial class DynamicTableView : TableView
         }
     }
 
-    private IDataTemplate CreateHeaderTemplate()
+    private FuncDataTemplate<DynamicTableViewColumn> CreateHeaderTemplate()
         => new FuncDataTemplate<DynamicTableViewColumn>(
             (definition, _) => definition is null ? null : new DynamicTableViewHeader(this, definition));
 
@@ -873,11 +883,12 @@ public sealed partial class DynamicTableView : TableView
 
         if (ControlTreeHelpers.FindVisualAncestor<TableViewRow>(e.Source) is not { DataContext: { } clicked } row)
             return;
+        ISelectionModel? selection = Selection;
         IReadOnlyList<object> targets;
-        var rowIsSelected = Selection?.SelectedItems.Any(item =>
+        var rowIsSelected = selection?.SelectedItems.Any(item =>
             Source?.AreSameRows(clicked, item) == true) == true;
-        if (rowIsSelected)
-            targets = Selection.SelectedItems.Where(static item => item is not null).Cast<object>().ToArray();
+        if (rowIsSelected && selection is not null)
+            targets = selection.SelectedItems.Where(static item => item is not null).Cast<object>().ToArray();
         else
             targets = [clicked];
         ContextMenuRequested?.Invoke(this, new(clicked, targets));
@@ -888,6 +899,8 @@ public sealed partial class DynamicTableView : TableView
     internal ContextMenu CreateColumnVisibilityContextMenu(TableViewColumnHeader placementTarget)
     {
         ArgumentNullException.ThrowIfNull(placementTarget);
+        _columnVisibilityMenuSubscriptions?.Dispose();
+        _columnVisibilityMenuSubscriptions = null;
         ContextMenu menu = new()
         {
             PlacementTarget = placementTarget
@@ -896,6 +909,7 @@ public sealed partial class DynamicTableView : TableView
         if (Source is null)
             return menu;
 
+        CompositeDisposable subscriptions = new();
         foreach (DynamicTableViewColumn definition in Source.Columns)
         {
             if (!_nativeColumns.TryGetValue(definition.Key, out TableViewColumn? native))
@@ -904,16 +918,17 @@ public sealed partial class DynamicTableView : TableView
             MenuItem item = new()
             {
                 Header = definition.Header.ToString() ?? string.Empty,
-                ToggleType = MenuItemToggleType.CheckBox
+                ToggleType = MenuItemToggleType.CheckBox,
+                IsChecked = native.IsVisible
             };
-            item.Bind(MenuItem.IsCheckedProperty, new Binding(nameof(TableViewColumn.IsVisible))
-            {
-                Source = native,
-                Mode = BindingMode.TwoWay
-            });
+            subscriptions.Add(native.GetObservable(TableViewColumn.IsVisibleProperty)
+                .Subscribe(visible => item.IsChecked = visible));
+            subscriptions.Add(item.GetObservable(MenuItem.IsCheckedProperty)
+                .Subscribe(isChecked => native.IsVisible = isChecked));
             menu.Items.Add(item);
         }
 
+        _columnVisibilityMenuSubscriptions = subscriptions;
         return menu;
     }
 
@@ -977,7 +992,7 @@ public sealed partial class DynamicTableView : TableView
     private DynamicTableViewColumn? FindDefinition(string key)
         => Source?.Columns.FirstOrDefault(column => string.Equals(column.Key, key, StringComparison.Ordinal));
 
-    private static int IndexOfColumn(IList<DynamicTableViewColumn> columns, string key)
+    private static int IndexOfColumn(ObservableCollection<DynamicTableViewColumn> columns, string key)
     {
         for (var i = 0; i < columns.Count; i++)
             if (string.Equals(columns[i].Key, key, StringComparison.Ordinal)) return i;
