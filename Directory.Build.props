@@ -2,6 +2,9 @@
   <PropertyGroup>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- All remaining analyzer and compiler warnings must fail the build. Intentional
+         rule exemptions are scoped with justification in .editorconfig. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <TestingPlatformShowTestsFailure>true</TestingPlatformShowTestsFailure>
 
     <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) --config-file $(MSBuildThisFileDirectory)testconfig.json</TestingPlatformCommandLineArguments>

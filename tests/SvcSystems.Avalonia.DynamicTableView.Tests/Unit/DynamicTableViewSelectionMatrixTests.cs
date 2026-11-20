@@ -50,7 +50,7 @@ public sealed class DynamicTableViewSelectionMatrixTests
         uiScheduler.AdvanceBy(100);
 
         DynamicTableViewTestRow selected = originalRows[1];
-        if (selectionSet == SelectionSet.Single)
+        if (selectionSet == SelectionSet.OnlyOne)
         {
             source.SelectionModel.Select(1);
         }
@@ -124,7 +124,7 @@ public sealed class DynamicTableViewSelectionMatrixTests
         SourceChange change,
         SelectionSet selectionSet)
     {
-        IEnumerable<string> selectedIds = selectionSet == SelectionSet.Single
+        IEnumerable<string> selectedIds = selectionSet == SelectionSet.OnlyOne
             ? ["b"]
             : ["a", "b", "c"];
         if (change == SourceChange.RemoveBeforeSelected)
@@ -169,7 +169,7 @@ public sealed class DynamicTableViewSelectionMatrixTests
 
     public enum SelectionSet
     {
-        Single,
+        OnlyOne,
         Multiple
     }
 

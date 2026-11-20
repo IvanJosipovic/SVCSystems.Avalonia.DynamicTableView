@@ -12,6 +12,10 @@
     <IsTrimmable>true</IsTrimmable>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- Trim/AOT diagnostics must fail the build instead of being silently shipped.
+         The compiler does not expand wildcards in WarningsAsErrors, so list the
+         ILLink trim analysis and NativeAOT warning ids explicitly. -->
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2032;IL2041;IL2046;IL2055;IL2057;IL2058;IL2060;IL2062;IL2063;IL2064;IL2065;IL2067;IL2068;IL2069;IL2070;IL2071;IL2072;IL2073;IL2074;IL2075;IL2076;IL2077;IL2078;IL2079;IL2080;IL2081;IL2082;IL2083;IL2084;IL2085;IL2086;IL2087;IL2088;IL2089;IL2090;IL2091;IL2092;IL2093;IL2094;IL2095;IL2096;IL2097;IL2098;IL2099;IL2104;IL2105;IL2106;IL2107;IL2108;IL2109;IL2110;IL2111;IL2112;IL2113;IL2114;IL2115;IL2116;IL2117;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
     <PackageId>SvcSystems.Avalonia.DynamicTableView</PackageId>
     <Authors>Ivan Josipovic</Authors>
     <Description>Dynamic table view control for Avalonia</Description>

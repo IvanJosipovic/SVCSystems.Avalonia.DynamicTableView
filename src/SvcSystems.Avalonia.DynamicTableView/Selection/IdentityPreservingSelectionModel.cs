@@ -46,7 +46,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
         _inner.PropertyChanged += (_, args) => PropertyChanged?.Invoke(this, args);
     }
 
-    public IEnumerable Source
+    public IEnumerable? Source
     {
         get => _inner.Source;
         set
@@ -344,6 +344,8 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
     private object?[] CaptureIdentitySource()
     {
         var source = _identitySource ?? Source;
+        if (source is null)
+            return [];
         if (source is IList list)
         {
             var items = new object?[list.Count];
@@ -360,7 +362,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
         return result.ToArray();
     }
 
-    private void RestoreSelectionIndexes(IReadOnlyList<int> indexes)
+    private void RestoreSelectionIndexes(List<int> indexes)
     {
         if (indexes.Count == 0)
         {
@@ -427,7 +429,7 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
         RestoreSelectionSnapshot(_selectionSnapshot);
     }
 
-    private bool SelectionMatchesIndexes(IReadOnlyList<int> indexes)
+    private bool SelectionMatchesIndexes(List<int> indexes)
     {
         if (_inner.SelectedIndexes.Count != indexes.Count)
         {
@@ -480,6 +482,8 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
 
         _restoredIndexes.Clear();
         var source = _identitySource ?? Source;
+        if (source is null)
+            return _restoredIndexes;
 
         if (source is IList list)
         {
@@ -513,16 +517,16 @@ internal sealed class IdentityPreservingSelectionModel<T, TIdentity> : IIdentity
         return _restoredIndexes;
     }
 
-    private List<int> FindIndexes(IReadOnlyList<TIdentity> snapshot, IReadOnlyList<object?> sourceItems)
+    private List<int> FindIndexes(TIdentity[] snapshot, object?[] sourceItems)
     {
-        HashSet<TIdentity> identities = new(snapshot.Count, _identityComparer);
+        HashSet<TIdentity> identities = new(snapshot.Length, _identityComparer);
         foreach (var identity in snapshot)
         {
             identities.Add(identity);
         }
 
-        List<int> indexes = new(snapshot.Count);
-        for (var index = 0; index < sourceItems.Count; index++)
+        List<int> indexes = new(snapshot.Length);
+        for (var index = 0; index < sourceItems.Length; index++)
         {
             if (sourceItems[index] is T item && identities.Contains(_identitySelector(item)))
             {

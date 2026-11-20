@@ -8,5 +8,5 @@
 - Selection-change tests cover identity preservation across replace, add, remove, move, sort, and updates; filter and search tests verify hidden rows leave selection and do not return when query is cleared.
 - Grid-line UI tests cover None, Horizontal, Vertical, and All on both data cells and column headers.
 - Use virtual schedulers and explicit completion events. Do not use `Task.Delay` or `Thread.Sleep`.
-- Build `SvcSystems.Avalonia.DynamicTableView.slnx` with `dotnet build --tl:off -clp:ErrorsOnly` before running tests.
+- Build `SvcSystems.Avalonia.DynamicTableView.slnx` with `dotnet build` before running tests.
 - UI tests use `[AvaloniaFact]`; data-source tests use `[Fact]` or `[Theory]`.

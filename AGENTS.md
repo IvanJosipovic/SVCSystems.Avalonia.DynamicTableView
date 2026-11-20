@@ -78,7 +78,7 @@ References:
 - All production code must be covered by unit tests; xUnit is required for unit testing.
 - UI tests must use Avalonia Headless (xUnit integration) and follow the headless testing guidance and helpers for input simulation.
 - Cover all public API and retained control behavior with focused unit or headless UI tests.
-- Run `dotnet build --tl:off -clp:ErrorsOnly` before tests.
+- Run `dotnet build` before tests.
 
 ## 7) Code conventions
 

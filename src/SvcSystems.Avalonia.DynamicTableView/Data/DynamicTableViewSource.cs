@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Diagnostics.CodeAnalysis;
 using System.Reactive.Concurrency;
 using System.Reactive.Subjects;
 using DynamicData;
@@ -6,7 +7,7 @@ using DynamicData;
 namespace SvcSystems.Avalonia.DynamicTableView;
 
 /// <summary>DynamicData-backed source that owns filtering, search, sorting, and selection.</summary>
-public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
+public sealed class DynamicTableViewSource<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] T, TKey> : IDynamicTableViewSource
     where T : notnull
     where TKey : notnull
 {
@@ -33,9 +34,14 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
     private bool _disposed;
 
     /// <summary>Creates a source from a caller-owned, observable DynamicData cache and stable row keys.</summary>
+    /// <param name="cache">The caller-owned cache whose changes drive the bound row collection.</param>
     /// <param name="keySelector">Returns each row's stable identity. It must be safe to call on the configured worker scheduler.</param>
+    /// <param name="columns">Optional typed column definitions to add initially.</param>
     /// <param name="workerScheduler">Schedules query processing and selection identity matching.</param>
     /// <param name="uiScheduler">Schedules bound collection and selection updates.</param>
+    /// <param name="searchDebounce">Delay before a search query is applied. Zero applies it immediately.</param>
+    /// <param name="searchScheduler">Schedules the search debounce. Defaults to the worker scheduler.</param>
+    /// <param name="options">Optional source behavior settings.</param>
     public DynamicTableViewSource(
         IObservableCache<T, TKey> cache,
         Func<T, TKey> keySelector,
@@ -86,7 +92,6 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
             .ObserveOn(_workerScheduler)
             .Subscribe(_ => UpdateFilterPredicate());
 
-#pragma warning disable IL2091 // DynamicData 9.4.33 annotates SortAndBind<T> with All, but its implementation uses the supplied comparer and does not reflect over row members.
         _pipelineSubscription = cache.Connect()
             .ObserveOn(_workerScheduler)
             .Filter(_filterSubject.ObserveOn(_workerScheduler))
@@ -98,7 +103,6 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
             .Subscribe(
                 static _ => { },
                 ex => SourceError?.Invoke(this, ex));
-#pragma warning restore IL2091
 
         _selectionModel.SetIdentitySource(_items);
     }
@@ -346,7 +350,7 @@ public sealed class DynamicTableViewSource<T, TKey> : IDynamicTableViewSource
         _filterSubject.OnNext(filter);
     }
 
-    private IComparer<T> BuildComparer(IReadOnlyList<DynamicTableViewSortDescriptor> descriptors)
+    private Comparer<T> BuildComparer(IReadOnlyList<DynamicTableViewSortDescriptor> descriptors)
     {
         if (descriptors.Count == 0)
             return Comparer<T>.Create((left, right) => CompareValues(_keySelector(left), _keySelector(right)));
